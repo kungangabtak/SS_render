@@ -139,6 +139,8 @@ function currentConfigKey() {
 /**
  * buildWsUrl(hub, gameId, token) -> full WS URL with role=sub
  * Hub can be base like wss://x.onrender.com or wss://x.onrender.com/
+ * 
+ * Produces URL format: wss://dom-hub.onrender.com/?role=sub&gameId=...&token=ACTUAL_TOKEN_VALUE
  */
 function buildWsUrl(hub, gameId, token) {
   let hubStr = String(hub || "").trim();
@@ -157,6 +159,7 @@ function buildWsUrl(hub, gameId, token) {
     u.searchParams.set("gameId", String(gameId).trim());
   }
   
+  // Add token (required for authentication)
   u.searchParams.set("token", String(token || "").trim());
   return u.toString();
 }
