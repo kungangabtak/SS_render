@@ -1,15 +1,17 @@
 /*
   Hole Cards Dashboard (vanilla static site)
+  - Multi-publisher support: tracks messages from multiple extension instances
   - Builds wss URL: ?room=...&role=sub&token=...
   - Connect/disconnect with cleanup
   - Auto-reconnect w/ exponential backoff (cap 10s)
-  - Renders latest 2 cards + metadata
+  - Renders latest 2 cards + metadata for selected publisher
   - Keeps expandable log (max 50)
 */
 
 const MAX_LOG = 50;
 const RECONNECT_CAP_MS = 10_000;
 const RECONNECT_BASE_MS = 500;
+const RENDER_DEBOUNCE_MS = 100;
 
 /** @type {WebSocket | null} */
 let ws = null;
@@ -20,7 +22,21 @@ let lastConfigKey = "";
 let lastWasAutoReconnect = false;
 
 let configDebounceTimer = null;
+let renderDebounceTimer = null;
 
+// ============================================================
+// Multi-Publisher Store
+// ============================================================
+// publishers[publisherId] = { lastSeen: number, latestByType: { [type]: fullMessage } }
+/** @type {Record<string, { lastSeen: number, latestByType: Record<string, any> }>} */
+const publishers = {};
+
+/** Currently selected publisher ID (null = auto-select most recent) */
+let selectedPublisherId = null;
+
+// ============================================================
+// DOM Elements
+// ============================================================
 const els = {
   hubInput: document.getElementById("hubInput"),
   gameIdInput: document.getElementById("gameIdInput"),
@@ -45,6 +61,14 @@ const els = {
   tableUrl: document.getElementById("tableUrl"),
 
   log: document.getElementById("log"),
+
+  // New multi-publisher elements
+  publishersList: document.getElementById("publishersList"),
+  publisherCount: document.getElementById("publisherCount"),
+  selectedPublisherInfo: document.getElementById("selectedPublisherInfo"),
+  selectedPublisherId: document.getElementById("selectedPublisherId"),
+  selectedPublisherLastSeen: document.getElementById("selectedPublisherLastSeen"),
+  jsonViewer: document.getElementById("jsonViewer"),
 };
 
 /**
@@ -96,6 +120,28 @@ function formatTwoCards(value1, suit1, value2, suit2) {
   const s1 = suitSymbol(suit1);
   const s2 = suitSymbol(suit2);
   return `${v1}${s1} ${v2}${s2}`;
+}
+
+/** Shorten a publisherId for display (first 8 chars) */
+function shortenId(id) {
+  if (!id) return "unknown";
+  return String(id).substring(0, 8);
+}
+
+/** Format seconds ago from timestamp */
+function formatSecondsAgo(ts) {
+  if (!ts) return "—";
+  const seconds = Math.floor((Date.now() - ts) / 1000);
+  if (seconds < 0) return "just now";
+  if (seconds === 0) return "just now";
+  if (seconds === 1) return "1s ago";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 1) return "1m ago";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return "1h ago";
+  return `${hours}h ago`;
 }
 
 function setStatus(status) {
@@ -340,6 +386,10 @@ function connect(opts = {}) {
   };
 }
 
+// ============================================================
+// Card Rendering (for selected publisher)
+// ============================================================
+
 function renderCards(value1, suit1, value2, suit2) {
   const v1 = normalizeValue(value1);
   const v2 = normalizeValue(value2);
@@ -397,6 +447,10 @@ function extractHandFields(msg) {
   };
 }
 
+// ============================================================
+// Multi-Publisher Message Handling
+// ============================================================
+
 function handleIncomingMessage(raw) {
   const receivedAt = Date.now();
 
@@ -424,6 +478,21 @@ function handleIncomingMessage(raw) {
     return;
   }
 
+  // Extract publisherId (required); fall back to "unknown" if missing
+  const publisherId = msg.publisherId || "unknown";
+  const msgType = msg.type || "unknown";
+
+  // Update publishers store
+  if (!publishers[publisherId]) {
+    publishers[publisherId] = {
+      lastSeen: receivedAt,
+      latestByType: {},
+    };
+  }
+  publishers[publisherId].lastSeen = receivedAt;
+  publishers[publisherId].latestByType[msgType] = msg;
+
+  // For log display
   const { value1, suit1, value2, suit2, url, ts } = extractHandFields(msg);
   const cardsText = formatTwoCards(value1, suit1, value2, suit2);
   const hasCards =
@@ -436,23 +505,215 @@ function handleIncomingMessage(raw) {
     String(value2).trim() !== "" &&
     String(suit2).trim() !== "";
 
-  // Only update the main UI when we have both cards, so other message types don't wipe the display.
-  if (hasCards) {
-    renderCards(value1, suit1, value2, suit2);
-    setLastUpdate(ts != null ? ts : receivedAt);
-    setTableUrl(url);
-  }
-
+  // Append to log with publisher info
   appendLog({
-    kind: hasCards ? "message" : "error",
+    kind: hasCards ? "message" : "info",
     time: ts != null ? Number(ts) : receivedAt,
-    cardsText: hasCards ? cardsText : "(missing cards)",
+    cardsText: hasCards ? cardsText : `[${msgType}]`,
     raw: prettyJson(msg),
+    publisherId: publisherId,
   });
+
+  // Schedule a debounced re-render
+  scheduleRender();
 }
 
+// ============================================================
+// Debounced Render
+// ============================================================
+
+function scheduleRender() {
+  if (renderDebounceTimer) return;
+  renderDebounceTimer = setTimeout(() => {
+    renderDebounceTimer = null;
+    renderPublishersUI();
+  }, RENDER_DEBOUNCE_MS);
+}
+
+/** Get the effective selected publisher (auto-select most recent if none selected) */
+function getEffectivePublisherId() {
+  // If we have a valid selection, use it
+  if (selectedPublisherId && publishers[selectedPublisherId]) {
+    return selectedPublisherId;
+  }
+
+  // Otherwise, auto-select most recently seen publisher
+  let mostRecent = null;
+  let mostRecentTime = 0;
+  for (const [id, pub] of Object.entries(publishers)) {
+    if (pub.lastSeen > mostRecentTime) {
+      mostRecentTime = pub.lastSeen;
+      mostRecent = id;
+    }
+  }
+  return mostRecent;
+}
+
+/** Render the full publishers UI and update card display */
+function renderPublishersUI() {
+  const pubIds = Object.keys(publishers);
+  const count = pubIds.length;
+
+  // Update count
+  if (els.publisherCount) {
+    els.publisherCount.textContent = count > 0 ? `(${count})` : "";
+  }
+
+  // Render publishers list
+  if (els.publishersList) {
+    els.publishersList.innerHTML = "";
+
+    if (count === 0) {
+      const empty = document.createElement("div");
+      empty.className = "pubEmpty";
+      empty.textContent = "No publishers yet. Waiting for messages...";
+      els.publishersList.appendChild(empty);
+    } else {
+      // Sort by lastSeen descending (most recent first)
+      const sorted = pubIds.sort((a, b) => publishers[b].lastSeen - publishers[a].lastSeen);
+
+      for (const id of sorted) {
+        const pub = publishers[id];
+        const isSelected = getEffectivePublisherId() === id;
+
+        const card = document.createElement("div");
+        card.className = `pubCard${isSelected ? " selected" : ""}`;
+        card.dataset.pubId = id;
+
+        // Publisher ID (shortened)
+        const idSpan = document.createElement("div");
+        idSpan.className = "pubId";
+        idSpan.textContent = shortenId(id);
+
+        // Last seen
+        const seenSpan = document.createElement("div");
+        seenSpan.className = "pubLastSeen";
+        seenSpan.textContent = formatSecondsAgo(pub.lastSeen);
+
+        // Hand preview if available
+        const handMsg = pub.latestByType["hand"];
+        const handPreview = document.createElement("div");
+        handPreview.className = "pubHandPreview";
+        if (handMsg) {
+          const { value1, suit1, value2, suit2, ts } = extractHandFields(handMsg);
+          const hasCards = value1 && suit1 && value2 && suit2;
+          if (hasCards) {
+            handPreview.innerHTML = `<span class="cards">${formatTwoCards(value1, suit1, value2, suit2)}</span>`;
+          } else {
+            handPreview.textContent = "No cards";
+          }
+        } else {
+          handPreview.textContent = "No hand data";
+        }
+
+        card.appendChild(idSpan);
+        card.appendChild(seenSpan);
+        card.appendChild(handPreview);
+
+        // Click to select
+        card.addEventListener("click", () => {
+          selectedPublisherId = id;
+          renderPublishersUI();
+        });
+
+        els.publishersList.appendChild(card);
+      }
+    }
+  }
+
+  // Update selected publisher info and card display
+  const effectiveId = getEffectivePublisherId();
+
+  if (effectiveId && publishers[effectiveId]) {
+    const pub = publishers[effectiveId];
+
+    // Update selected publisher info
+    if (els.selectedPublisherId) {
+      els.selectedPublisherId.textContent = shortenId(effectiveId);
+    }
+    if (els.selectedPublisherLastSeen) {
+      els.selectedPublisherLastSeen.textContent = formatSecondsAgo(pub.lastSeen);
+    }
+    if (els.selectedPublisherInfo) {
+      els.selectedPublisherInfo.hidden = false;
+    }
+
+    // Render cards from hand message if available
+    const handMsg = pub.latestByType["hand"];
+    if (handMsg) {
+      const { value1, suit1, value2, suit2, url, ts } = extractHandFields(handMsg);
+      const hasCards = value1 && suit1 && value2 && suit2;
+      if (hasCards) {
+        renderCards(value1, suit1, value2, suit2);
+        setLastUpdate(ts || pub.lastSeen);
+        setTableUrl(url);
+      }
+    }
+
+    // Render JSON viewer with all latestByType entries
+    if (els.jsonViewer) {
+      els.jsonViewer.innerHTML = "";
+
+      const types = Object.keys(pub.latestByType).sort();
+      if (types.length === 0) {
+        els.jsonViewer.textContent = "No messages yet.";
+      } else {
+        for (const type of types) {
+          const msg = pub.latestByType[type];
+
+          const typeEntry = document.createElement("div");
+          typeEntry.className = "jsonEntry";
+          typeEntry.dataset.expanded = "false";
+
+          const header = document.createElement("div");
+          header.className = "jsonEntryHeader";
+
+          const typeLabel = document.createElement("span");
+          typeLabel.className = "jsonType";
+          typeLabel.textContent = type;
+
+          const tsLabel = document.createElement("span");
+          tsLabel.className = "jsonTs";
+          tsLabel.textContent = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : "—";
+
+          header.appendChild(typeLabel);
+          header.appendChild(tsLabel);
+
+          const content = document.createElement("pre");
+          content.className = "jsonContent";
+          content.textContent = prettyJson(msg);
+
+          typeEntry.appendChild(header);
+          typeEntry.appendChild(content);
+
+          header.addEventListener("click", () => {
+            typeEntry.dataset.expanded = typeEntry.dataset.expanded === "true" ? "false" : "true";
+          });
+
+          els.jsonViewer.appendChild(typeEntry);
+        }
+      }
+    }
+  } else {
+    // No publisher selected
+    if (els.selectedPublisherInfo) {
+      els.selectedPublisherInfo.hidden = true;
+    }
+    renderCards("—", "", "—", "");
+    setLastUpdate(null);
+    setTableUrl(null);
+    if (els.jsonViewer) {
+      els.jsonViewer.textContent = "Select a publisher to view details.";
+    }
+  }
+}
+
+// ============================================================
+// Log
+// ============================================================
+
 function appendLog(entry) {
-  // entry: {kind, time, cardsText, raw}
+  // entry: {kind, time, cardsText, raw, publisherId?}
 
   const row = document.createElement("div");
   row.className = `logRow${entry.kind === "error" ? " error" : ""}`;
@@ -462,6 +723,15 @@ function appendLog(entry) {
   summary.className = "logRowSummary";
 
   const left = document.createElement("div");
+  left.className = "logRowLeft";
+
+  // Publisher badge (if available)
+  if (entry.publisherId) {
+    const pubBadge = document.createElement("span");
+    pubBadge.className = "pubBadge";
+    pubBadge.textContent = shortenId(entry.publisherId);
+    left.appendChild(pubBadge);
+  }
 
   const badge = document.createElement("div");
   badge.className = `badge ${/♥|♦/.test(entry.cardsText) ? "red" : "black"}`;
@@ -565,7 +835,19 @@ function prefillFromQueryParamsAndAutoconnect() {
   }
 }
 
+// ============================================================
+// Update "seconds ago" displays periodically
+// ============================================================
+setInterval(() => {
+  // Only update if we have publishers and are connected
+  if (Object.keys(publishers).length > 0) {
+    scheduleRender();
+  }
+}, 5000);
+
+// ============================================================
 // Wire UI
+// ============================================================
 els.connectBtn.addEventListener("click", () => {
   lastWasAutoReconnect = false;
   connect({ isAuto: false });
@@ -594,11 +876,13 @@ els.gameIdInput.addEventListener("input", () => {
   });
 });
 
+// ============================================================
 // Initial state
+// ============================================================
 setStatus("disconnected");
 renderCards("—", "", "—", "");
 els.lastUpdate.textContent = "—";
 setTableUrl(null);
+renderPublishersUI();
 
 prefillFromQueryParamsAndAutoconnect();
-

@@ -11,7 +11,7 @@
       <header class="header">
         <div>
           <h1>Hole Cards Dashboard</h1>
-          <p class="subhead">Subscribe to your Render WebSocket hub and display the latest 2 hole cards.</p>
+          <p class="subhead">Multi-publisher view — subscribe to your WebSocket hub and display hole cards from multiple extension instances.</p>
         </div>
         <div class="status" id="statusBadge" data-status="disconnected">
           <span class="dot" aria-hidden="true"></span>
@@ -35,7 +35,7 @@
           </div>
 
           <div class="field">
-            <label for="gameIdInput">Game ID</label>
+            <label for="gameIdInput">Game ID (Room)</label>
             <input
               id="gameIdInput"
               type="text"
@@ -59,32 +59,66 @@
         </div>
       </section>
 
-      <section class="panel">
-        <div class="cardsHeader">
-          <h2>Latest hand</h2>
-          <div class="meta">
-            <div class="metaRow">
-              <span class="metaLabel">Last update</span>
-              <span class="metaValue" id="lastUpdate">—</span>
-            </div>
-            <div class="metaRow" id="tableUrlRow" hidden>
-              <span class="metaLabel">Table</span>
-              <a class="metaValue link" id="tableUrl" href="#" target="_blank" rel="noreferrer">—</a>
-            </div>
-          </div>
+      <!-- Publishers Panel -->
+      <section class="panel publishersPanel">
+        <div class="publishersHeader">
+          <h2>Publishers <span class="pubCount" id="publisherCount"></span></h2>
+          <div class="publishersHint">Click a publisher to select and view their data</div>
         </div>
-
-        <div class="cards" aria-label="Latest hole cards">
-          <div class="cardTile" id="card1" data-color="black" aria-label="Card 1">
-            <div class="value" id="card1Value">—</div>
-            <div class="suit" id="card1Suit">?</div>
-          </div>
-          <div class="cardTile" id="card2" data-color="black" aria-label="Card 2">
-            <div class="value" id="card2Value">—</div>
-            <div class="suit" id="card2Suit">?</div>
-          </div>
+        <div class="publishersList" id="publishersList">
+          <div class="pubEmpty">No publishers yet. Waiting for messages...</div>
         </div>
       </section>
+
+      <!-- Two-column layout: Cards + JSON Viewer -->
+      <div class="twoCol">
+        <!-- Left: Cards Display -->
+        <section class="panel cardsPanel">
+          <div class="cardsHeader">
+            <h2>Latest hand</h2>
+            <div class="meta" id="selectedPublisherInfo" hidden>
+              <div class="metaRow">
+                <span class="metaLabel">Publisher</span>
+                <span class="metaValue" id="selectedPublisherId">—</span>
+              </div>
+              <div class="metaRow">
+                <span class="metaLabel">Last seen</span>
+                <span class="metaValue" id="selectedPublisherLastSeen">—</span>
+              </div>
+              <div class="metaRow">
+                <span class="metaLabel">Last update</span>
+                <span class="metaValue" id="lastUpdate">—</span>
+              </div>
+              <div class="metaRow" id="tableUrlRow" hidden>
+                <span class="metaLabel">Table</span>
+                <a class="metaValue link" id="tableUrl" href="#" target="_blank" rel="noreferrer">—</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="cards" aria-label="Latest hole cards">
+            <div class="cardTile" id="card1" data-color="black" aria-label="Card 1">
+              <div class="value" id="card1Value">—</div>
+              <div class="suit" id="card1Suit">?</div>
+            </div>
+            <div class="cardTile" id="card2" data-color="black" aria-label="Card 2">
+              <div class="value" id="card2Value">—</div>
+              <div class="suit" id="card2Suit">?</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Right: JSON Viewer -->
+        <section class="panel jsonPanel">
+          <div class="jsonHeader">
+            <h2>Message Types</h2>
+            <div class="jsonHint">Click to expand full JSON</div>
+          </div>
+          <div class="jsonViewer" id="jsonViewer">
+            Select a publisher to view details.
+          </div>
+        </section>
+      </div>
 
       <section class="panel">
         <div class="logHeader">
@@ -102,4 +136,3 @@
     <script src="./app.js"></script>
   </body>
 </html>
-

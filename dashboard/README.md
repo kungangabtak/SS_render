@@ -2,6 +2,16 @@
 
 A minimal **vanilla HTML/CSS/JS** dashboard that connects to your Render WebSocket hub as `role=sub` and displays the latest **2 hole cards** from incoming messages.
 
+## Multi-Publisher Support
+
+This dashboard now supports **multiple publishers** (multiple people running the Chrome extension in the same PokerNow room). Features include:
+
+- **Publishers Panel**: Shows all active publishers with their short ID, last seen time, and latest hand preview
+- **Click to Select**: Click any publisher card to view their detailed data
+- **Auto-Selection**: Automatically selects the most recently seen publisher
+- **JSON Viewer**: View all message types (hand, state, etc.) from the selected publisher
+- **Real-time Updates**: Publisher cards update with "seconds ago" timestamps
+
 ## Hub URL
 
 This dashboard is pre-configured to connect to: **`wss://dom-hub.onrender.com/`**
@@ -11,7 +21,7 @@ This dashboard is pre-configured to connect to: **`wss://dom-hub.onrender.com/`*
 - Open `dashboard/index.html` in your browser.
 - Fill in:
   - **Hub WSS base** (default: `wss://dom-hub.onrender.com/`)
-  - **Game ID** (paste full PokerNow URL or just the game ID, e.g., `pglQ2HgWGgYbDUSq7f9moVbXR`)
+  - **Game ID (Room)** (paste full PokerNow URL or just the game ID, e.g., `pglQ2HgWGgYbDUSq7f9moVbXR`)
   - **Token** (your HUB_TOKEN)
 - Click **Connect**.
 
@@ -47,6 +57,41 @@ Example:
 
 That's it — Render will serve `dashboard/index.html`.
 
+## Message Format
+
+The Chrome extension publisher includes a `publisherId` field on every hub message at the top level:
+
+```json
+{
+  "publisherId": "abc123def456...",
+  "type": "hand",
+  "data": {
+    "value1": "J",
+    "suit1": "h",
+    "value2": "J",
+    "suit2": "s",
+    "url": "https://www.pokernow.club/games/...",
+    "timestamp": 1702847123456
+  },
+  "timestamp": 1702847123456
+}
+```
+
+Messages without a `publisherId` are bucketed under `"unknown"`.
+
+## Connection
+
+- **Single WebSocket**: The dashboard maintains one WebSocket connection to the hub
+- **Format**: `wss://dom-hub.onrender.com/?room=<ROOM>&role=sub&token=<TOKEN>`
+- **Auto-reconnect**: Exponential backoff (500ms → 1s → 2s → 4s → 8s → 10s cap)
+
+## Connection Status Indicator
+
+The status badge shows:
+- 🟢 **connected** — WebSocket is open and receiving messages
+- 🟡 **reconnecting** — Attempting to reconnect (with pulse animation)
+- 🔴 **disconnected** — Not connected (manual disconnect or failed)
+
 ## Notes
 
 - The WS URL format used is:
@@ -57,8 +102,9 @@ That's it — Render will serve `dashboard/index.html`.
 
 - The UI shows:
   - Connection status (connected / disconnected / reconnecting)
-  - Latest two card tiles using suit symbols (♥ ♦ ♣ ♠)
+  - Publishers panel with all active extension instances
+  - Latest two card tiles for selected publisher using suit symbols (♥ ♦ ♣ ♠)
+  - JSON viewer showing all message types from selected publisher
   - Last update time (prefers `data.timestamp`, falls back to top-level `timestamp`)
   - Table URL link (`data.url`) when present
   - A small expandable log (~50 rows) with a **Clear log** button
-
