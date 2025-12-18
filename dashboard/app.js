@@ -23,14 +23,13 @@ let configDebounceTimer = null;
 
 const els = {
   hubInput: document.getElementById("hubInput"),
-  roomInput: document.getElementById("roomInput"),
   tokenInput: document.getElementById("tokenInput"),
 
   connectBtn: document.getElementById("connectBtn"),
   disconnectBtn: document.getElementById("disconnectBtn"),
   clearLogBtn: document.getElementById("clearLogBtn"),
 
-  statusDot: document.getElementById("statusDot"),
+  statusBadge: document.getElementById("statusBadge"),
   statusText: document.getElementById("statusText"),
 
   card1: document.getElementById("card1"),
@@ -41,16 +40,11 @@ const els = {
   card2Suit: document.getElementById("card2Suit"),
 
   lastUpdate: document.getElementById("lastUpdate"),
-  tableUrlLink: document.getElementById("tableUrlLink"),
-
-  wsUrlPreview: document.getElementById("wsUrlPreview"),
+  tableUrlRow: document.getElementById("tableUrlRow"),
+  tableUrl: document.getElementById("tableUrl"),
 
   log: document.getElementById("log"),
 };
-
-function nowIsoish() {
-  return new Date().toLocaleString();
-}
 
 function normalizeValue(v) {
   if (v == null) return "—";
@@ -86,7 +80,7 @@ function formatTwoCards(value1, suit1, value2, suit2) {
 
 function setStatus(status) {
   // status: connected | disconnected | reconnecting
-  if (els.statusDot) els.statusDot.dataset.status = status;
+  els.statusBadge.dataset.status = status;
   els.statusText.textContent = status;
 
   const isConnected = status === "connected";
@@ -96,36 +90,14 @@ function setStatus(status) {
   els.disconnectBtn.disabled = !(isConnected || isConnecting);
 }
 
-function updateWsUrlPreview() {
-  if (!els.wsUrlPreview) return;
-  const hub = els.hubInput.value.trim();
-  const room = els.roomInput.value.trim();
-  const token = els.tokenInput.value.trim();
-
-  if (!hub || !room || !token) {
-    els.wsUrlPreview.textContent = "—";
-    return;
-  }
-
-  try {
-    els.wsUrlPreview.textContent = buildWsUrl(hub, room, token);
-  } catch {
-    els.wsUrlPreview.textContent = "—";
-  }
-}
-
 function updateQueryStringFromInputs() {
   try {
     const url = new URL(window.location.href);
     const hub = els.hubInput.value.trim();
-    const room = els.roomInput.value.trim();
     const token = els.tokenInput.value.trim();
 
     if (hub) url.searchParams.set("hub", hub);
     else url.searchParams.delete("hub");
-
-    if (room) url.searchParams.set("room", room);
-    else url.searchParams.delete("room");
 
     if (token) url.searchParams.set("token", token);
     else url.searchParams.delete("token");
@@ -137,14 +109,14 @@ function updateQueryStringFromInputs() {
 }
 
 function currentConfigKey() {
-  return `${els.hubInput.value.trim()}|${els.roomInput.value.trim()}|${els.tokenInput.value.trim()}`;
+  return `${els.hubInput.value.trim()}|${els.tokenInput.value.trim()}`;
 }
 
 /**
  * buildWsUrl(hub, room, token) -> full WS URL with role=sub
  * Hub can be base like wss://x.onrender.com or wss://x.onrender.com/
  */
-function buildWsUrl(hub, room, token) {
+function buildWsUrl(hub, token) {
   let hubStr = String(hub || "").trim();
   if (!hubStr) throw new Error("Missing hub");
 
@@ -154,7 +126,7 @@ function buildWsUrl(hub, room, token) {
   }
 
   const u = new URL(hubStr);
-  u.searchParams.set("room", String(room || "").trim());
+  // Room is optional - server will default to 'default' if not provided
   u.searchParams.set("role", "sub");
   u.searchParams.set("token", String(token || "").trim());
   return u.toString();
@@ -211,33 +183,23 @@ function scheduleReconnect() {
 }
 
 function connect(opts = {}) {
-  const { isAuto = false } = opts;
-
   const hub = els.hubInput.value.trim();
-  const room = els.roomInput.value.trim();
   const token = els.tokenInput.value.trim();
 
-  if (!hub || !room || !token) {
+  if (!hub || !token) {
     appendLog({
       kind: "error",
       time: Date.now(),
       cardsText: "—",
-      raw: JSON.stringify({ error: "Missing hub/room/token" }, null, 2),
+      raw: JSON.stringify({ error: "Missing hub/token" }, null, 2),
     });
     setStatus("disconnected");
     return;
   }
 
-  // If a reconnect was scheduled under a previous config, cancel it; this connect() call supersedes it.
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-
   const configKey = currentConfigKey();
   lastConfigKey = configKey;
   updateQueryStringFromInputs();
-  updateWsUrlPreview();
 
   manualDisconnect = false;
 
@@ -246,7 +208,7 @@ function connect(opts = {}) {
 
   let url;
   try {
-    url = buildWsUrl(hub, room, token);
+    url = buildWsUrl(hub, token);
   } catch (e) {
     appendLog({
       kind: "error",
@@ -277,13 +239,6 @@ function connect(opts = {}) {
   ws.onopen = () => {
     reconnectAttempt = 0;
     setStatus("connected");
-
-    appendLog({
-      kind: "info",
-      time: Date.now(),
-      cardsText: "(connected)",
-      raw: JSON.stringify({ event: "open", url }, null, 2),
-    });
   };
 
   ws.onmessage = (evt) => {
@@ -305,30 +260,10 @@ function connect(opts = {}) {
 
     if (manualDisconnect) {
       setStatus("disconnected");
-      appendLog({
-        kind: "info",
-        time: Date.now(),
-        cardsText: "(disconnected)",
-        raw: JSON.stringify(
-          { event: "close", code: evt && evt.code, reason: evt && evt.reason, wasClean: evt && evt.wasClean },
-          null,
-          2
-        ),
-      });
       return;
     }
 
     setStatus("reconnecting");
-    appendLog({
-      kind: "info",
-      time: Date.now(),
-      cardsText: "(reconnecting)",
-      raw: JSON.stringify(
-        { event: "close", code: evt && evt.code, reason: evt && evt.reason, wasClean: evt && evt.wasClean },
-        null,
-        2
-      ),
-    });
 
     scheduleReconnect();
   };
@@ -342,13 +277,11 @@ function renderCards(value1, suit1, value2, suit2) {
 
   els.card1Value.textContent = v1;
   els.card1Suit.textContent = s1;
-  els.card1.classList.remove("cardTile--placeholder", "cardTile--red", "cardTile--black");
-  els.card1.classList.add(suitColor(suit1) === "red" ? "cardTile--red" : "cardTile--black");
+  els.card1.dataset.color = suitColor(suit1);
 
   els.card2Value.textContent = v2;
   els.card2Suit.textContent = s2;
-  els.card2.classList.remove("cardTile--placeholder", "cardTile--red", "cardTile--black");
-  els.card2.classList.add(suitColor(suit2) === "red" ? "cardTile--red" : "cardTile--black");
+  els.card2.dataset.color = suitColor(suit2);
 }
 
 function setLastUpdate(ts) {
@@ -360,19 +293,16 @@ function setLastUpdate(ts) {
 }
 
 function setTableUrl(url) {
-  if (!els.tableUrlLink) return;
   if (!url) {
-    els.tableUrlLink.textContent = "—";
-    els.tableUrlLink.href = "#";
-    els.tableUrlLink.removeAttribute("target");
-    els.tableUrlLink.removeAttribute("rel");
+    els.tableUrlRow.hidden = true;
+    els.tableUrl.textContent = "—";
+    els.tableUrl.href = "#";
     return;
   }
 
-  els.tableUrlLink.textContent = url;
-  els.tableUrlLink.href = url;
-  els.tableUrlLink.setAttribute("target", "_blank");
-  els.tableUrlLink.setAttribute("rel", "noreferrer");
+  els.tableUrlRow.hidden = false;
+  els.tableUrl.textContent = url;
+  els.tableUrl.href = url;
 }
 
 function prettyJson(objOrStr) {
@@ -425,16 +355,27 @@ function handleIncomingMessage(raw) {
 
   const { value1, suit1, value2, suit2, url, ts } = extractHandFields(msg);
   const cardsText = formatTwoCards(value1, suit1, value2, suit2);
+  const hasCards =
+    value1 != null &&
+    suit1 != null &&
+    value2 != null &&
+    suit2 != null &&
+    String(value1).trim() !== "" &&
+    String(suit1).trim() !== "" &&
+    String(value2).trim() !== "" &&
+    String(suit2).trim() !== "";
 
-  // Update main UI even if message isn't type=hand, as long as it has the fields.
-  renderCards(value1, suit1, value2, suit2);
-  setLastUpdate(ts != null ? ts : receivedAt);
-  setTableUrl(url);
+  // Only update the main UI when we have both cards, so other message types don't wipe the display.
+  if (hasCards) {
+    renderCards(value1, suit1, value2, suit2);
+    setLastUpdate(ts != null ? ts : receivedAt);
+    setTableUrl(url);
+  }
 
   appendLog({
-    kind: "message",
+    kind: hasCards ? "message" : "error",
     time: ts != null ? Number(ts) : receivedAt,
-    cardsText,
+    cardsText: hasCards ? cardsText : "(missing cards)",
     raw: prettyJson(msg),
   });
 }
@@ -443,54 +384,42 @@ function appendLog(entry) {
   // entry: {kind, time, cardsText, raw}
 
   const row = document.createElement("div");
-  row.className = `logRow${entry.kind === "error" ? " logRow--error" : ""}`;
+  row.className = `logRow${entry.kind === "error" ? " error" : ""}`;
+  row.dataset.expanded = "false";
 
   const summary = document.createElement("div");
-  summary.className = "logRow__summary";
+  summary.className = "logRowSummary";
 
-  const timeEl = document.createElement("div");
-  timeEl.className = "logRow__time mono";
-  timeEl.textContent = new Date(entry.time || Date.now()).toLocaleTimeString();
+  const left = document.createElement("div");
 
-  const cardsEl = document.createElement("div");
-  cardsEl.className = "logRow__cards";
+  const badge = document.createElement("div");
+  badge.className = `badge ${/♥|♦/.test(entry.cardsText) ? "red" : "black"}`;
 
-  // Expect "V♠ V♥" style; fall back to full text.
-  const parts = String(entry.cardsText || "").split(" ").filter(Boolean);
-  const pill1 = document.createElement("span");
-  pill1.className = `pill ${/♥|♦/.test(parts[0] || entry.cardsText) ? "pill--red" : "pill--black"}`;
-  pill1.textContent = parts[0] || String(entry.cardsText || "—");
-  cardsEl.appendChild(pill1);
+  const cardsSpan = document.createElement("span");
+  cardsSpan.textContent = entry.cardsText;
 
-  if (parts.length >= 2) {
-    const pill2 = document.createElement("span");
-    pill2.className = `pill ${/♥|♦/.test(parts[1]) ? "pill--red" : "pill--black"}`;
-    pill2.textContent = parts[1];
-    cardsEl.appendChild(pill2);
-  }
+  badge.appendChild(cardsSpan);
+  left.appendChild(badge);
 
-  const typeEl = document.createElement("div");
-  typeEl.className = "logRow__type mono";
-  typeEl.textContent = entry.kind === "message" ? "msg" : entry.kind;
+  const right = document.createElement("div");
+  right.className = "rowMeta";
+  right.textContent = new Date(entry.time || Date.now()).toLocaleTimeString();
 
-  summary.appendChild(timeEl);
-  summary.appendChild(cardsEl);
-  summary.appendChild(typeEl);
+  summary.appendChild(left);
+  summary.appendChild(right);
 
   const details = document.createElement("div");
-  details.className = "logRow__details";
+  details.className = "logRowDetails";
 
   const pre = document.createElement("pre");
-  pre.className = "logRow__pre mono";
   pre.textContent = entry.raw || "";
-
   details.appendChild(pre);
 
   row.appendChild(summary);
   row.appendChild(details);
 
-  summary.addEventListener("click", () => {
-    row.classList.toggle("logRow--open");
+  row.addEventListener("click", () => {
+    row.dataset.expanded = row.dataset.expanded === "true" ? "false" : "true";
   });
 
   const nearBottom = els.log.scrollTop + els.log.clientHeight >= els.log.scrollHeight - 40;
@@ -519,17 +448,24 @@ function scheduleConfigReconnect() {
 
     const key = currentConfigKey();
     updateQueryStringFromInputs();
-    updateWsUrlPreview();
 
     // If we're connected (or trying), and config changed, reconnect cleanly.
     const isActive = ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
     const isPendingReconnect = Boolean(reconnectTimer);
 
     if ((isActive || isPendingReconnect) && key !== lastConfigKey) {
+      const hub = els.hubInput.value.trim();
+      const token = els.tokenInput.value.trim();
+
       lastConfigKey = key;
       manualDisconnect = false;
       safeCleanupWs();
-      connect({ isAuto: true });
+      // If config is currently incomplete (user is editing), just stop; they can connect once complete.
+      if (hub && token) {
+        connect({ isAuto: true });
+      } else {
+        setStatus("disconnected");
+      }
     } else {
       lastConfigKey = key;
     }
@@ -540,17 +476,14 @@ function prefillFromQueryParamsAndAutoconnect() {
   try {
     const u = new URL(window.location.href);
     const hub = u.searchParams.get("hub");
-    const room = u.searchParams.get("room");
     const token = u.searchParams.get("token");
 
     if (hub) els.hubInput.value = hub;
-    if (room) els.roomInput.value = room;
     if (token) els.tokenInput.value = token;
 
     lastConfigKey = currentConfigKey();
-    updateWsUrlPreview();
 
-    if (hub && room && token) {
+    if (hub && token) {
       connect({ isAuto: true });
     }
   } catch {
@@ -572,7 +505,7 @@ els.clearLogBtn.addEventListener("click", () => {
   clearLog();
 });
 
-[els.hubInput, els.roomInput, els.tokenInput].forEach((input) => {
+[els.hubInput, els.tokenInput].forEach((input) => {
   input.addEventListener("input", () => {
     scheduleConfigReconnect();
   });
@@ -583,13 +516,6 @@ setStatus("disconnected");
 renderCards("—", "", "—", "");
 els.lastUpdate.textContent = "—";
 setTableUrl(null);
-updateWsUrlPreview();
-
-appendLog({
-  kind: "info",
-  time: Date.now(),
-  cardsText: "(ready)",
-  raw: JSON.stringify({ event: "ready", time: nowIsoish() }, null, 2),
-});
 
 prefillFromQueryParamsAndAutoconnect();
+

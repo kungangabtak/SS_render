@@ -2,119 +2,92 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Render WS Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hole Cards Dashboard</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="header">
-      <div class="header__title">
-        <div class="header__brand">Render WS Dashboard</div>
-        <div class="header__subtitle">Subscribes as <span class="mono">role=sub</span> and displays the latest hole cards.</div>
-      </div>
-
-      <div class="status">
-        <span id="statusDot" class="status__dot" data-status="disconnected" aria-hidden="true"></span>
-        <span id="statusText" class="status__text">disconnected</span>
-      </div>
-    </header>
-
-    <main class="container">
-      <section class="panel">
-        <div class="panel__header">
-          <h2 class="panel__title">Connection</h2>
-          <div class="panel__actions">
-            <button id="connectBtn" class="btn btn--primary" type="button">Connect</button>
-            <button id="disconnectBtn" class="btn" type="button" disabled>Disconnect</button>
-          </div>
+    <div class="page">
+      <header class="header">
+        <div>
+          <h1>Hole Cards Dashboard</h1>
+          <p class="subhead">Subscribe to your Render WebSocket hub and display the latest 2 hole cards.</p>
         </div>
+        <div class="status" id="statusBadge" data-status="disconnected">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="text" id="statusText">disconnected</span>
+        </div>
+      </header>
 
-        <form id="connForm" class="form" autocomplete="off">
-          <label class="field">
-            <span class="field__label">Hub WSS Base</span>
+      <section class="panel">
+        <div class="grid">
+          <div class="field">
+            <label for="hubInput">Hub WSS base</label>
             <input
               id="hubInput"
-              class="field__input mono"
               type="text"
-              placeholder="wss://YOUR-HUB.onrender.com/"
-              inputmode="url"
               spellcheck="false"
+              placeholder="wss://dom-hub.onrender.com/"
+              value="wss://dom-hub.onrender.com/"
+              autocomplete="off"
             />
-            <span class="field__hint">Example: <span class="mono">wss://YOUR-HUB.onrender.com/</span> (trailing slash optional)</span>
-          </label>
-
-          <label class="field">
-            <span class="field__label">Room</span>
-            <input id="roomInput" class="field__input mono" type="text" placeholder="ROOM" spellcheck="false" />
-          </label>
-
-          <label class="field">
-            <span class="field__label">Token</span>
-            <input id="tokenInput" class="field__input mono" type="password" placeholder="HUB_TOKEN" spellcheck="false" />
-            <span class="field__hint">Stored only in-memory; can be passed via query string for convenience.</span>
-          </label>
-
-          <div class="wsurl">
-            <div class="wsurl__label">WS URL</div>
-            <div class="wsurl__value mono" id="wsUrlPreview">—</div>
+            <div class="hint">Example: <code>wss://dom-hub.onrender.com/</code></div>
           </div>
-        </form>
+
+          <div class="field">
+            <label for="tokenInput">Token</label>
+            <input id="tokenInput" type="password" spellcheck="false" placeholder="HUB_TOKEN" autocomplete="off" />
+          </div>
+
+          <div class="actions">
+            <button id="connectBtn" class="btn primary">Connect</button>
+            <button id="disconnectBtn" class="btn" disabled>Disconnect</button>
+            <button id="clearLogBtn" class="btn danger" title="Clear message log">Clear log</button>
+          </div>
+        </div>
       </section>
 
       <section class="panel">
-        <div class="panel__header">
-          <h2 class="panel__title">Latest Hand</h2>
+        <div class="cardsHeader">
+          <h2>Latest hand</h2>
           <div class="meta">
-            <div class="meta__item">
-              <span class="meta__label">Last update</span>
-              <span class="meta__value mono" id="lastUpdate">—</span>
+            <div class="metaRow">
+              <span class="metaLabel">Last update</span>
+              <span class="metaValue" id="lastUpdate">—</span>
             </div>
-            <div class="meta__item">
-              <span class="meta__label">Table URL</span>
-              <span class="meta__value mono">
-                <a id="tableUrlLink" href="#" target="_blank" rel="noreferrer">—</a>
-              </span>
+            <div class="metaRow" id="tableUrlRow" hidden>
+              <span class="metaLabel">Table</span>
+              <a class="metaValue link" id="tableUrl" href="#" target="_blank" rel="noreferrer">—</a>
             </div>
           </div>
         </div>
 
-        <div class="cards" aria-label="Hole cards">
-          <div id="card1" class="cardTile cardTile--placeholder" aria-label="Card 1">
-            <div id="card1Value" class="cardTile__value">—</div>
-            <div id="card1Suit" class="cardTile__suit">—</div>
+        <div class="cards" aria-label="Latest hole cards">
+          <div class="cardTile" id="card1" data-color="black" aria-label="Card 1">
+            <div class="value" id="card1Value">—</div>
+            <div class="suit" id="card1Suit">?</div>
           </div>
-          <div id="card2" class="cardTile cardTile--placeholder" aria-label="Card 2">
-            <div id="card2Value" class="cardTile__value">—</div>
-            <div id="card2Suit" class="cardTile__suit">—</div>
+          <div class="cardTile" id="card2" data-color="black" aria-label="Card 2">
+            <div class="value" id="card2Value">—</div>
+            <div class="suit" id="card2Suit">?</div>
           </div>
         </div>
       </section>
 
-      <section class="panel panel--log">
-        <div class="panel__header">
-          <h2 class="panel__title">Log</h2>
-          <div class="panel__actions">
-            <button id="clearLogBtn" class="btn btn--danger" type="button">Clear log</button>
-          </div>
+      <section class="panel">
+        <div class="logHeader">
+          <h2>Message log</h2>
+          <div class="logHint">Last ~50 messages. Click a row to expand raw JSON.</div>
         </div>
-
-        <div class="logHint">
-          Shows the last ~50 messages. Click a row to expand raw JSON. Parse failures are captured as error rows.
-        </div>
-
-        <div id="log" class="log" role="list"></div>
+        <div class="log" id="log"></div>
       </section>
-    </main>
 
-    <footer class="footer">
-      <div class="footer__text">
-        Tip: you can prefill via query params:
-        <span class="mono">?hub=wss%3A%2F%2FYOUR-HUB.onrender.com%2F&room=ROOM&token=HUB_TOKEN</span>
-      </div>
-    </footer>
+      <footer class="footer">
+        <span class="muted">Tip: open with query params <code>?hub=...&amp;token=...</code> to auto-connect.</span>
+      </footer>
+    </div>
 
     <script src="./app.js"></script>
   </body>
 </html>
-
 

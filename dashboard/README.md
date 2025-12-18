@@ -1,40 +1,53 @@
-# Render WebSocket Hub Dashboard (Static)
+# Hole Cards Dashboard
 
-A minimal **vanilla HTML/CSS/JS** dashboard that connects to your Render WebSocket hub as **`role=sub`** and displays the latest **two hole cards** from incoming messages.
+A minimal **vanilla HTML/CSS/JS** dashboard that connects to your Render WebSocket hub as `role=sub` and displays the latest **2 hole cards** from incoming messages.
 
-## Run locally
+## Hub URL
 
-- Open `dashboard/index.html` directly in your browser.
-- Optionally prefill via query params (and auto-connect):
+This dashboard is pre-configured to connect to: **`wss://dom-hub.onrender.com/`**
 
-`index.html?hub=wss%3A%2F%2FYOUR-HUB.onrender.com%2F&room=ROOM&token=HUB_TOKEN`
+## How to run locally
+
+- Open `dashboard/index.html` in your browser.
+- Fill in:
+  - **Token** (your HUB_TOKEN)
+- Click **Connect**.
+
+No build step, no server required.
+
+## Query-string support (auto-prefill + auto-connect)
+
+If you open the page with these query params, the inputs will be prefilled and it will auto-connect:
+
+- `hub` (your base hub URL)
+- `token`
+
+Example:
+
+`index.html?hub=wss://dom-hub.onrender.com/&token=HUB_TOKEN`
 
 ## Deploy on Render Static Site
 
-- **Build command**: *(none)*
-- **Publish directory**: `dashboard`
+1. Create a new **Static Site** on Render.
+2. Point it at this repo.
+3. Configure:
+   - **Build Command**: (leave empty)
+   - **Publish Directory**: `dashboard`
 
-## WebSocket URL format
+That's it — Render will serve `dashboard/index.html`.
 
-The dashboard builds the WS URL as:
+## Notes
 
-`wss://YOUR-HUB.onrender.com/?room=ROOM&role=sub&token=HUB_TOKEN`
+- The WS URL format used is:
 
-## Incoming message shape (example)
+  `wss://dom-hub.onrender.com/?role=sub&token=HUB_TOKEN`
 
-```json
-{
-  "type": "hand",
-  "data": {
-    "value1": "J",
-    "suit1": "h",
-    "value2": "J",
-    "suit2": "s",
-    "url": "https://www.pokernow.club/games/ROOM",
-    "timestamp": 1765982556547
-  },
-  "timestamp": 1765982556548
-}
-```
+- Room parameter is optional. If not provided, the server defaults to the "default" room.
 
+- The UI shows:
+  - Connection status (connected / disconnected / reconnecting)
+  - Latest two card tiles using suit symbols (♥ ♦ ♣ ♠)
+  - Last update time (prefers `data.timestamp`, falls back to top-level `timestamp`)
+  - Table URL link (`data.url`) when present
+  - A small expandable log (~50 rows) with a **Clear log** button
 
