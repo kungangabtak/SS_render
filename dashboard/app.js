@@ -23,6 +23,7 @@ let configDebounceTimer = null;
 
 const els = {
   hubInput: document.getElementById("hubInput"),
+  gameIdInput: document.getElementById("gameIdInput"),
   tokenInput: document.getElementById("tokenInput"),
 
   connectBtn: document.getElementById("connectBtn"),
@@ -45,6 +46,25 @@ const els = {
 
   log: document.getElementById("log"),
 };
+
+/**
+ * Extract game ID from PokerNow URL or return the raw input
+ * Accepts: https://www.pokernow.club/games/pglQ2HgWGgYbDUSq7f9moVbXR
+ * Returns: pglQ2HgWGgYbDUSq7f9moVbXR
+ */
+function extractGameId(input) {
+  const s = String(input || "").trim();
+  if (!s) return "";
+
+  // Try to extract from URL pattern
+  const match = s.match(/\/games\/([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return match[1];
+  }
+
+  // Otherwise return as-is (assuming it's already just the ID)
+  return s;
+}
 
 function normalizeValue(v) {
   if (v == null) return "—";
@@ -94,10 +114,14 @@ function updateQueryStringFromInputs() {
   try {
     const url = new URL(window.location.href);
     const hub = els.hubInput.value.trim();
+    const gameId = extractGameId(els.gameIdInput.value);
     const token = els.tokenInput.value.trim();
 
     if (hub) url.searchParams.set("hub", hub);
     else url.searchParams.delete("hub");
+
+    if (gameId) url.searchParams.set("gameId", gameId);
+    else url.searchParams.delete("gameId");
 
     if (token) url.searchParams.set("token", token);
     else url.searchParams.delete("token");
@@ -109,14 +133,14 @@ function updateQueryStringFromInputs() {
 }
 
 function currentConfigKey() {
-  return `${els.hubInput.value.trim()}|${els.tokenInput.value.trim()}`;
+  return `${els.hubInput.value.trim()}|${extractGameId(els.gameIdInput.value)}|${els.tokenInput.value.trim()}`;
 }
 
 /**
- * buildWsUrl(hub, room, token) -> full WS URL with role=sub
+ * buildWsUrl(hub, gameId, token) -> full WS URL with role=sub
  * Hub can be base like wss://x.onrender.com or wss://x.onrender.com/
  */
-function buildWsUrl(hub, token) {
+function buildWsUrl(hub, gameId, token) {
   let hubStr = String(hub || "").trim();
   if (!hubStr) throw new Error("Missing hub");
 
@@ -126,8 +150,13 @@ function buildWsUrl(hub, token) {
   }
 
   const u = new URL(hubStr);
-  // Room is optional - server will default to 'default' if not provided
   u.searchParams.set("role", "sub");
+  
+  // Add gameId (required for extension communication)
+  if (gameId) {
+    u.searchParams.set("gameId", String(gameId).trim());
+  }
+  
   u.searchParams.set("token", String(token || "").trim());
   return u.toString();
 }
@@ -184,14 +213,15 @@ function scheduleReconnect() {
 
 function connect(opts = {}) {
   const hub = els.hubInput.value.trim();
+  const gameId = extractGameId(els.gameIdInput.value);
   const token = els.tokenInput.value.trim();
 
-  if (!hub || !token) {
+  if (!hub || !gameId || !token) {
     appendLog({
       kind: "error",
       time: Date.now(),
       cardsText: "—",
-      raw: JSON.stringify({ error: "Missing hub/token" }, null, 2),
+      raw: JSON.stringify({ error: "Missing hub/gameId/token" }, null, 2),
     });
     setStatus("disconnected");
     return;
@@ -208,7 +238,7 @@ function connect(opts = {}) {
 
   let url;
   try {
-    url = buildWsUrl(hub, token);
+    url = buildWsUrl(hub, gameId, token);
   } catch (e) {
     appendLog({
       kind: "error",
@@ -455,13 +485,14 @@ function scheduleConfigReconnect() {
 
     if ((isActive || isPendingReconnect) && key !== lastConfigKey) {
       const hub = els.hubInput.value.trim();
+      const gameId = extractGameId(els.gameIdInput.value);
       const token = els.tokenInput.value.trim();
 
       lastConfigKey = key;
       manualDisconnect = false;
       safeCleanupWs();
       // If config is currently incomplete (user is editing), just stop; they can connect once complete.
-      if (hub && token) {
+      if (hub && gameId && token) {
         connect({ isAuto: true });
       } else {
         setStatus("disconnected");
@@ -476,14 +507,16 @@ function prefillFromQueryParamsAndAutoconnect() {
   try {
     const u = new URL(window.location.href);
     const hub = u.searchParams.get("hub");
+    const gameId = u.searchParams.get("gameId");
     const token = u.searchParams.get("token");
 
     if (hub) els.hubInput.value = hub;
+    if (gameId) els.gameIdInput.value = gameId;
     if (token) els.tokenInput.value = token;
 
     lastConfigKey = currentConfigKey();
 
-    if (hub && token) {
+    if (hub && gameId && token) {
       connect({ isAuto: true });
     }
   } catch {
@@ -503,6 +536,15 @@ els.disconnectBtn.addEventListener("click", () => {
 
 els.clearLogBtn.addEventListener("click", () => {
   clearLog();
+});
+
+// Auto-extract game ID from PokerNow URLs on paste/input
+els.gameIdInput.addEventListener("input", () => {
+  const extracted = extractGameId(els.gameIdInput.value);
+  if (extracted !== els.gameIdInput.value) {
+    els.gameIdInput.value = extracted;
+  }
+  scheduleConfigReconnect();
 });
 
 [els.hubInput, els.tokenInput].forEach((input) => {

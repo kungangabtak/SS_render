@@ -35,6 +35,18 @@
           </div>
 
           <div class="field">
+            <label for="gameIdInput">Game ID</label>
+            <input
+              id="gameIdInput"
+              type="text"
+              spellcheck="false"
+              placeholder="pglQ2HgWGgYbDUSq7f9moVbXR"
+              autocomplete="off"
+            />
+            <div class="hint">Paste full PokerNow URL or just the game ID</div>
+          </div>
+
+          <div class="field">
             <label for="tokenInput">Token</label>
             <input id="tokenInput" type="password" spellcheck="false" placeholder="HUB_TOKEN" autocomplete="off" />
           </div>
@@ -83,7 +95,7 @@
       </section>
 
       <footer class="footer">
-        <span class="muted">Tip: open with query params <code>?hub=...&amp;token=...</code> to auto-connect.</span>
+        <span class="muted">Tip: open with query params <code>?hub=...&amp;gameId=...&amp;token=...</code> to auto-connect.</span>
       </footer>
     </div>
 

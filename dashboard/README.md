@@ -10,21 +10,32 @@ This dashboard is pre-configured to connect to: **`wss://dom-hub.onrender.com/`*
 
 - Open `dashboard/index.html` in your browser.
 - Fill in:
+  - **Hub WSS base** (default: `wss://dom-hub.onrender.com/`)
+  - **Game ID** (paste full PokerNow URL or just the game ID, e.g., `pglQ2HgWGgYbDUSq7f9moVbXR`)
   - **Token** (your HUB_TOKEN)
 - Click **Connect**.
 
 No build step, no server required.
+
+### Game ID extraction
+
+The dashboard automatically extracts the game ID from PokerNow URLs:
+- Full URL: `https://www.pokernow.club/games/pglQ2HgWGgYbDUSq7f9moVbXR`
+- Extracted ID: `pglQ2HgWGgYbDUSq7f9moVbXR`
+
+You can paste either format—the dashboard will extract just the ID.
 
 ## Query-string support (auto-prefill + auto-connect)
 
 If you open the page with these query params, the inputs will be prefilled and it will auto-connect:
 
 - `hub` (your base hub URL)
-- `token`
+- `gameId` (the PokerNow game/room ID)
+- `token` (your HUB_TOKEN)
 
 Example:
 
-`index.html?hub=wss://dom-hub.onrender.com/&token=HUB_TOKEN`
+`index.html?hub=wss://dom-hub.onrender.com/&gameId=pglQ2HgWGgYbDUSq7f9moVbXR&token=HUB_TOKEN`
 
 ## Deploy on Render Static Site
 
@@ -40,9 +51,9 @@ That's it — Render will serve `dashboard/index.html`.
 
 - The WS URL format used is:
 
-  `wss://dom-hub.onrender.com/?role=sub&token=HUB_TOKEN`
+  `wss://dom-hub.onrender.com/?role=sub&gameId=pglQ2HgWGgYbDUSq7f9moVbXR&token=HUB_TOKEN`
 
-- Room parameter is optional. If not provided, the server defaults to the "default" room.
+- The `gameId` parameter is required for the extension in the other repo to properly route messages to the correct game/room.
 
 - The UI shows:
   - Connection status (connected / disconnected / reconnecting)
