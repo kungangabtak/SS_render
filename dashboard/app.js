@@ -140,7 +140,8 @@ function currentConfigKey() {
  * buildWsUrl(hub, gameId, token) -> full WS URL with role=sub
  * Hub can be base like wss://x.onrender.com or wss://x.onrender.com/
  * 
- * Produces URL format: wss://dom-hub.onrender.com/?role=sub&gameId=...&token=ACTUAL_TOKEN_VALUE
+ * Produces URL format: wss://dom-hub.onrender.com/?role=sub&room=...&token=ACTUAL_TOKEN_VALUE
+ * Note: Uses 'room' parameter (not 'gameId') to match server expectations
  */
 function buildWsUrl(hub, gameId, token) {
   let hubStr = String(hub || "").trim();
@@ -154,13 +155,19 @@ function buildWsUrl(hub, gameId, token) {
   const u = new URL(hubStr);
   u.searchParams.set("role", "sub");
   
-  // Add gameId (required for extension communication)
-  if (gameId) {
-    u.searchParams.set("gameId", String(gameId).trim());
+  // Add room parameter (maps from gameId - this is what the server expects)
+  const room = String(gameId || "").trim();
+  if (!room) {
+    throw new Error("Missing room/gameId");
   }
+  u.searchParams.set("room", room);
   
-  // Add token (required for authentication)
-  u.searchParams.set("token", String(token || "").trim());
+  // Add token (required for authentication) - validate it's not empty
+  const tokenValue = String(token || "").trim();
+  if (!tokenValue) {
+    throw new Error("Missing or empty token");
+  }
+  u.searchParams.set("token", tokenValue);
   return u.toString();
 }
 
@@ -219,12 +226,35 @@ function connect(opts = {}) {
   const gameId = extractGameId(els.gameIdInput.value);
   const token = els.tokenInput.value.trim();
 
-  if (!hub || !gameId || !token) {
+  // Validate all required fields are present and non-empty
+  if (!hub) {
     appendLog({
       kind: "error",
       time: Date.now(),
       cardsText: "—",
-      raw: JSON.stringify({ error: "Missing hub/gameId/token" }, null, 2),
+      raw: JSON.stringify({ error: "Missing hub URL" }, null, 2),
+    });
+    setStatus("disconnected");
+    return;
+  }
+
+  if (!gameId) {
+    appendLog({
+      kind: "error",
+      time: Date.now(),
+      cardsText: "—",
+      raw: JSON.stringify({ error: "Missing gameId/room" }, null, 2),
+    });
+    setStatus("disconnected");
+    return;
+  }
+
+  if (!token) {
+    appendLog({
+      kind: "error",
+      time: Date.now(),
+      cardsText: "—",
+      raw: JSON.stringify({ error: "Missing or empty token - ensure token matches HUB_TOKEN from Render" }, null, 2),
     });
     setStatus("disconnected");
     return;
@@ -242,6 +272,14 @@ function connect(opts = {}) {
   let url;
   try {
     url = buildWsUrl(hub, gameId, token);
+    // Log the constructed URL for debugging (without exposing full token)
+    const urlForLog = url.replace(/token=([^&]+)/, 'token=***');
+    appendLog({
+      kind: "message",
+      time: Date.now(),
+      cardsText: "Connecting...",
+      raw: JSON.stringify({ action: "connect", url: urlForLog, room: gameId }, null, 2),
+    });
   } catch (e) {
     appendLog({
       kind: "error",

@@ -51,9 +51,9 @@ That's it — Render will serve `dashboard/index.html`.
 
 - The WS URL format used is:
 
-  `wss://dom-hub.onrender.com/?role=sub&gameId=pglQ2HgWGgYbDUSq7f9moVbXR&token=HUB_TOKEN`
+  `wss://dom-hub.onrender.com/?role=sub&room=pglQ2HgWGgYbDUSq7f9moVbXR&token=HUB_TOKEN`
 
-- The `gameId` parameter is required for the extension in the other repo to properly route messages to the correct game/room.
+- The `room` parameter (mapped from the Game ID input) is required to match the room the publisher is using. The token must match the `HUB_TOKEN` environment variable set on your Render service.
 
 - The UI shows:
   - Connection status (connected / disconnected / reconnecting)
