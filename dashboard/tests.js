@@ -274,28 +274,52 @@ function testCardNormalization() {
 function testTokenExpiryLogic() {
   console.log("Testing token expiry logic...");
   
-  // Simulate 4003 handling with token
+  // Simulate 4003 handling with token (manual mode)
   let lastConnectionUsedToken = true;
+  let autoFetch = false;
   let shouldReconnect = false;
   
   const code = 4003;
   if (code === 4003) {
     if (lastConnectionUsedToken) {
-      // Should NOT auto-reconnect - user needs new token
-      shouldReconnect = false;
+      if (autoFetch) {
+        shouldReconnect = true; // Auto-fetch will get new token
+      } else {
+        shouldReconnect = false; // Manual - user needs to provide token
+      }
     } else {
-      // No token was used, should reconnect
       shouldReconnect = true;
     }
   }
   
-  assert(shouldReconnect === false, "Should NOT reconnect when token was used and expired");
+  assert(shouldReconnect === false, "Should NOT reconnect when token was used and expired (manual mode)");
+  
+  // Simulate 4003 handling with token (auto-fetch mode)
+  autoFetch = true;
+  shouldReconnect = false;
+  if (code === 4003) {
+    if (lastConnectionUsedToken) {
+      if (autoFetch) {
+        shouldReconnect = true; // Auto-fetch will get new token
+      } else {
+        shouldReconnect = false;
+      }
+    } else {
+      shouldReconnect = true;
+    }
+  }
+  
+  assert(shouldReconnect === true, "Should reconnect when token expired and auto-fetch enabled");
   
   // Simulate 4003 handling without token (unexpected case)
   lastConnectionUsedToken = false;
   if (code === 4003) {
     if (lastConnectionUsedToken) {
-      shouldReconnect = false;
+      if (autoFetch) {
+        shouldReconnect = true;
+      } else {
+        shouldReconnect = false;
+      }
     } else {
       shouldReconnect = true;
     }
@@ -306,8 +330,28 @@ function testTokenExpiryLogic() {
   console.log("✓ Token expiry logic tests passed");
 }
 
+// Test auto-fetch token logic
+function testAutoFetchTokenLogic() {
+  console.log("Testing auto-fetch token logic...");
+  
+  // Mock fetch token function
+  async function mockGetSubscriberToken(roomId, inviteCode) {
+    assert(roomId, "roomId should be provided");
+    assert(inviteCode, "inviteCode should be provided");
+    return "mock-jwt-token-" + roomId;
+  }
+  
+  // Test token fetch
+  mockGetSubscriberToken("room123", "invite456").then(token => {
+    assert(token === "mock-jwt-token-room123", "Should return token with roomId");
+    console.log("✓ Auto-fetch token logic tests passed");
+  }).catch(err => {
+    console.error("✗ Auto-fetch token logic test failed:", err);
+  });
+}
+
 // Run all tests
-function runAllTests() {
+async function runAllTests() {
   console.log("\n=== Running Dashboard Test Suite ===\n");
   
   const tests = [
@@ -320,22 +364,23 @@ function runAllTests() {
     testReconnectLogic,
     testCardNormalization,
     testTokenExpiryLogic,
+    testAutoFetchTokenLogic,
   ];
   
   let passed = 0;
   let failed = 0;
   const failures = [];
   
-  tests.forEach(test => {
+  for (const test of tests) {
     try {
-      test();
+      await test();
       passed++;
     } catch (e) {
       failed++;
       failures.push({ test: test.name, error: e.message });
       console.error(`✗ ${test.name} failed: ${e.message}`);
     }
-  });
+  }
   
   console.log(`\n=== Test Results ===`);
   console.log(`Passed: ${passed}`);

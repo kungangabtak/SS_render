@@ -117,6 +117,42 @@ h2 {
   }
 }
 
+/* Checkbox field styling */
+.field-checkbox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--cyan);
+}
+
+.checkbox-label span {
+  user-select: none;
+}
+
+/* Hide invite code field by default (shown only when auto-fetch is enabled) */
+#inviteCodeField {
+  display: none;
+}
+
+#inviteCodeField.visible {
+  display: block;
+}
+
 .field input {
   width: 100%;
   padding: 10px 11px;

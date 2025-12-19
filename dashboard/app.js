@@ -28,6 +28,10 @@ let renderDebounceTimer = null;
 /** Track if last connection attempt used a token (for token expiry handling) */
 let lastConnectionUsedToken = false;
 
+/** Auth service configuration */
+const AUTH_SERVICE_URL = "https://dom-auth.onrender.com/token";
+const DEFAULT_INVITE_CODE = "91175076b507402075f4b9395476a92d"; // Default invite code
+
 // ============================================================
 // Multi-Publisher Store
 // ============================================================
@@ -45,6 +49,8 @@ const els = {
   hubInput: document.getElementById("hubInput"),
   gameIdInput: document.getElementById("gameIdInput"),
   tokenInput: document.getElementById("tokenInput"),
+  inviteCodeInput: document.getElementById("inviteCodeInput"),
+  autoFetchCheckbox: document.getElementById("autoFetchCheckbox"),
 
   connectBtn: document.getElementById("connectBtn"),
   disconnectBtn: document.getElementById("disconnectBtn"),
@@ -183,7 +189,69 @@ function updateQueryStringFromInputs() {
 }
 
 function currentConfigKey() {
-  return `${els.hubInput.value.trim()}|${extractGameId(els.gameIdInput.value)}|${els.tokenInput.value.trim()}`;
+  return `${els.hubInput.value.trim()}|${extractGameId(els.gameIdInput.value)}|${els.tokenInput.value.trim()}|${els.autoFetchCheckbox?.checked}`;
+}
+
+/**
+ * Auto-fetch subscriber token from dom_auth service
+ * @param {string} roomId - The room/game ID
+ * @param {string} inviteCode - Invite code for authentication
+ * @returns {Promise<string>} JWT token
+ */
+async function getSubscriberToken(roomId, inviteCode) {
+  appendLog({
+    kind: "info",
+    time: Date.now(),
+    cardsText: "[auth]",
+    raw: JSON.stringify({ event: "Fetching token from auth service...", roomId }, null, 2),
+  });
+
+  try {
+    const response = await fetch(AUTH_SERVICE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        room: roomId,
+        role: 'sub',  // Subscriber role
+        inviteCode: inviteCode || DEFAULT_INVITE_CODE
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Token request failed: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.token) {
+      throw new Error('No token in response');
+    }
+
+    appendLog({
+      kind: "info",
+      time: Date.now(),
+      cardsText: "[auth]",
+      raw: JSON.stringify({ 
+        event: "Token fetched successfully",
+        expiresIn: data.expiresIn || "unknown"
+      }, null, 2),
+    });
+
+    return data.token;
+  } catch (error) {
+    appendLog({
+      kind: "error",
+      time: Date.now(),
+      cardsText: "[auth error]",
+      raw: JSON.stringify({ 
+        event: "Failed to fetch token",
+        error: error.message,
+        hint: "Check invite code and auth service availability"
+      }, null, 2),
+    });
+    throw error;
+  }
 }
 
 /**
@@ -271,10 +339,12 @@ function scheduleReconnect() {
   }, delay);
 }
 
-function connect(opts = {}) {
+async function connect(opts = {}) {
   const hub = els.hubInput.value.trim();
   const gameId = extractGameId(els.gameIdInput.value);
-  const token = els.tokenInput.value.trim();
+  let token = els.tokenInput.value.trim();
+  const autoFetch = els.autoFetchCheckbox?.checked ?? false;
+  const inviteCode = els.inviteCodeInput?.value?.trim() || DEFAULT_INVITE_CODE;
 
   // Validate required fields (hub and gameId are required; token is optional)
   if (!hub) {
@@ -297,6 +367,29 @@ function connect(opts = {}) {
     });
     setStatus("disconnected");
     return;
+  }
+
+  // Auto-fetch token if enabled and no manual token provided
+  if (autoFetch && !token) {
+    try {
+      setStatus("reconnecting"); // Show connecting status during fetch
+      token = await getSubscriberToken(gameId, inviteCode);
+      // Update the token input with fetched token (masked)
+      els.tokenInput.value = token;
+    } catch (error) {
+      appendLog({
+        kind: "error",
+        time: Date.now(),
+        cardsText: "—",
+        raw: JSON.stringify({ 
+          error: "Failed to auto-fetch token", 
+          detail: error.message,
+          hint: "Uncheck 'Auto-fetch token' to connect without token, or verify invite code"
+        }, null, 2),
+      });
+      setStatus("disconnected");
+      return;
+    }
   }
 
   // Token is optional - subscribers don't need it by default
@@ -401,27 +494,49 @@ function connect(opts = {}) {
         });
         break;
       case 4003:
-        // Token expired - handle based on whether we used a token
+        // Token expired - handle based on whether we used a token and auto-fetch setting
         if (lastConnectionUsedToken) {
-          appendLog({
-            kind: "error",
-            time: Date.now(),
-            cardsText: "(close 4003)",
-            raw: JSON.stringify({ 
-              event: "close", 
-              code, 
-              reason: "Token expired", 
-              detail: reason,
-              action: "Please enter a new JWT token and click Connect.",
-              hint: "Your token has expired. Get a new token from the authenticator service."
-            }, null, 2),
-          });
-          // Clear the expired token and highlight the field
-          els.tokenInput.value = "";
-          els.tokenInput.classList.add("token-expired");
-          els.tokenInput.placeholder = "Token expired — enter new JWT";
-          // Focus the token input to draw attention
-          els.tokenInput.focus();
+          const autoFetch = els.autoFetchCheckbox?.checked ?? false;
+          
+          if (autoFetch) {
+            // Auto-fetch enabled - will fetch new token and reconnect
+            appendLog({
+              kind: "info",
+              time: Date.now(),
+              cardsText: "(close 4003)",
+              raw: JSON.stringify({ 
+                event: "close", 
+                code, 
+                reason: "Token expired", 
+                detail: reason,
+                action: "Auto-fetching new token and reconnecting..."
+              }, null, 2),
+            });
+            // Clear expired token
+            els.tokenInput.value = "";
+            // Don't set expired state - we'll auto-reconnect with new token
+          } else {
+            // Manual token mode - user needs to provide new token
+            appendLog({
+              kind: "error",
+              time: Date.now(),
+              cardsText: "(close 4003)",
+              raw: JSON.stringify({ 
+                event: "close", 
+                code, 
+                reason: "Token expired", 
+                detail: reason,
+                action: "Please enter a new JWT token and click Connect.",
+                hint: "Your token has expired. Get a new token or enable 'Auto-fetch token'."
+              }, null, 2),
+            });
+            // Clear the expired token and highlight the field
+            els.tokenInput.value = "";
+            els.tokenInput.classList.add("token-expired");
+            els.tokenInput.placeholder = "Token expired — enter new JWT";
+            // Focus the token input to draw attention
+            els.tokenInput.focus();
+          }
         } else {
           appendLog({
             kind: "error",
@@ -482,11 +597,20 @@ function connect(opts = {}) {
 
     if (code === 4003) {
       // Token expired
+      const autoFetch = els.autoFetchCheckbox?.checked ?? false;
+      
       if (lastConnectionUsedToken) {
-        // We had a token that expired - user must provide new token
-        // Don't auto-reconnect as it would fail with the same expired token
-        setStatus("disconnected");
-        return;
+        if (autoFetch) {
+          // Auto-fetch enabled - reconnect (will fetch new token automatically)
+          setStatus("reconnecting");
+          scheduleReconnect();
+          return;
+        } else {
+          // Manual token mode - user must provide new token
+          // Don't auto-reconnect as it would fail with the same expired token
+          setStatus("disconnected");
+          return;
+        }
       } else {
         // No token was used, this is unexpected - try reconnecting without token
         setStatus("reconnecting");
@@ -1062,6 +1186,20 @@ els.tokenInput.addEventListener("input", () => {
   }
   scheduleConfigReconnect();
 });
+
+// Toggle invite code field visibility based on auto-fetch checkbox
+if (els.autoFetchCheckbox) {
+  els.autoFetchCheckbox.addEventListener("change", () => {
+    const inviteCodeField = document.getElementById("inviteCodeField");
+    if (inviteCodeField) {
+      if (els.autoFetchCheckbox.checked) {
+        inviteCodeField.classList.add("visible");
+      } else {
+        inviteCodeField.classList.remove("visible");
+      }
+    }
+  });
+}
 
 // ============================================================
 // Initial state

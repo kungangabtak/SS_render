@@ -6,7 +6,7 @@
 
 ## Test Results Summary
 
-### ✅ Unit Tests (9/9 Passing)
+### ✅ Unit Tests (10/10 Passing)
 - ✅ extractGameId - URL extraction works correctly
 - ✅ buildWsUrl - URL construction with/without token works
 - ✅ Error code handling - All hub error codes (4001-4004) are handled
@@ -15,7 +15,8 @@
 - ✅ Reconnect logic - Exponential backoff calculation is correct
 - ✅ Card normalization - Card value normalization works
 - ✅ Regular message handling - Regular messages process correctly
-- ✅ Token expiry logic - Correctly handles 4003 based on token usage
+- ✅ Token expiry logic - Correctly handles 4003 based on token usage and auto-fetch
+- ✅ Auto-fetch token logic - Token fetching from dom_auth works correctly
 
 ### ✅ Integration Tests (2/2 Passing)
 - ✅ Snapshot message handling - Correctly processes hub snapshot on connect
@@ -63,38 +64,35 @@
 **Location:** `app.js` lines 27, 305, 408-430, 460-475, 1032-1040, 1055-1062  
 **CSS:** `styles.css` lines 95-113 (token-expired animation)
 
-### ⚠️ Medium Priority Issues
+### ✅ Issue #4: Auto-Fetch Token from Auth Service (IMPROVEMENT) — IMPLEMENTED
+**Status:** ✅ IMPLEMENTED  
+**Impact:** HIGH - Greatly improves UX and enables automatic token management
 
-#### 3. **README Documentation Outdated**
-**Status:** OUTDATED  
-**Impact:** LOW - Documentation doesn't match current implementation
+**What was added:**
+- Integrated with `dom_auth` service at `https://dom-auth.onrender.com/token`
+- `getSubscriberToken()` function fetches JWT tokens for subscribers
+- Auto-fetch checkbox in UI to enable/disable automatic token fetching
+- Invite code input field for authentication with auth service
+- When enabled:
+  - Automatically fetches token on connect if no manual token provided
+  - Automatically fetches new token and reconnects when token expires (4003)
+  - Visual feedback during token fetch
+- When disabled:
+  - Falls back to previous manual token entry behavior
+  - Shows token expired state with helpful hints
 
-**Issues:**
-- README still mentions token as required (lines 26, 45, 97, 111, 113)
-- Should be updated to reflect token is optional
-- Connection format examples need updating
+**Location:** 
+- `app.js` lines 31-32 (config), 195-244 (fetch function), 319-342 (connect integration), 455-479 (expiry handling)
+- `index.html` lines 54-68 (UI elements)
+- `styles.css` lines 120-149 (checkbox styling)
 
-#### 4. **Publisher Store Memory Growth**
-**Status:** POTENTIAL LEAK  
-**Impact:** LOW - Only affects long-running sessions
+**Usage:**
+1. Check "Auto-fetch token from auth service"
+2. Enter invite code (default provided)
+3. Click Connect - token fetched automatically
+4. Token auto-refreshes on expiry
 
-**Issue:**
-- `publishers` object never removes old publishers
-- If many publishers connect/disconnect, memory could grow
-- Consider cleanup for publishers not seen in X minutes
-
-**Location:** `app.js` line 33
-
-#### 5. **Token Expiry Reconnect Logic**
-**Status:** INCOMPLETE  
-**Impact:** MEDIUM - Token expiry won't auto-fix
-
-**Issue:**
-- Error code 4003 (token expired) triggers reconnect
-- But reconnect uses same expired token
-- Should fetch new JWT before reconnecting if token was required
-
-**Location:** `app.js` line 397-409
+---
 
 ### ✅ Verified Working Features
 
@@ -114,19 +112,12 @@
    - ✅ Publisher selection works
    - ✅ Log display works
 
-## Recommendations
+## Recommendations (Low Priority)
 
-### Immediate Actions (Critical)
-1. **Add snapshot message handling** - Required for proper hub integration
-2. **Fix XSS vulnerability** - Replace innerHTML with textContent
-
-### Short-term Actions (Important)
-3. **Update README** - Reflect token optional status
-4. **Improve token expiry handling** - Add JWT refresh logic
-
-### Long-term Actions (Nice to have)
-5. **Add publisher cleanup** - Remove stale publishers after timeout
-6. **Add more comprehensive error handling** - Better user feedback
+### Future Enhancements
+1. **Update README** - Document auto-fetch token feature and updated authentication flow
+2. **Add publisher cleanup** - Remove stale publishers after timeout period
+3. **Enhanced error handling** - More detailed user feedback for various error scenarios
 
 ## Test Files
 

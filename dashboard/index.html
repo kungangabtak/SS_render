@@ -52,6 +52,20 @@
             <div class="hint">Only needed if hub has REQUIRE_SUB_TOKEN=true</div>
           </div>
 
+          <div class="field field-checkbox">
+            <label class="checkbox-label">
+              <input type="checkbox" id="autoFetchCheckbox" />
+              <span>Auto-fetch token from auth service</span>
+            </label>
+            <div class="hint">Automatically fetches JWT tokens when needed</div>
+          </div>
+
+          <div class="field" id="inviteCodeField">
+            <label for="inviteCodeInput">Invite Code <span class="optional">(for auto-fetch)</span></label>
+            <input id="inviteCodeInput" type="text" spellcheck="false" placeholder="91175076b507402075f4b9395476a92d" autocomplete="off" />
+            <div class="hint">Required for token auto-fetch authentication</div>
+          </div>
+
           <div class="actions">
             <button id="connectBtn" class="btn primary">Connect</button>
             <button id="disconnectBtn" class="btn" disabled>Disconnect</button>
