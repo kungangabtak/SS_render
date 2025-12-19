@@ -90,6 +90,12 @@ h2 {
   margin-bottom: 6px;
 }
 
+.field label .optional {
+  font-weight: normal;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 .field input {
   width: 100%;
   padding: 10px 11px;

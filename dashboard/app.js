@@ -1,11 +1,12 @@
 /*
   Hole Cards Dashboard (vanilla static site)
   - Multi-publisher support: tracks messages from multiple extension instances
-  - Builds wss URL: ?room=...&role=sub&token=...
+  - Builds wss URL: ?room=...&role=sub (token optional, only if REQUIRE_SUB_TOKEN=true on hub)
   - Connect/disconnect with cleanup
   - Auto-reconnect w/ exponential backoff (cap 10s)
   - Renders latest 2 cards + metadata for selected publisher
   - Keeps expandable log (max 50)
+  - Handles hub error codes: 4001 (invalid role), 4002 (invalid token), 4003 (token expired), 4004 (claim mismatch)
 */
 
 const MAX_LOG = 50;
@@ -186,7 +187,8 @@ function currentConfigKey() {
  * buildWsUrl(hub, gameId, token) -> full WS URL with role=sub
  * Hub can be base like wss://x.onrender.com or wss://x.onrender.com/
  * 
- * Produces URL format: wss://dom-hub.onrender.com/?role=sub&room=...&token=ACTUAL_TOKEN_VALUE
+ * Produces URL format: wss://dom-hub.onrender.com/?role=sub&room=...
+ * Token is optional - only added if provided (required if hub has REQUIRE_SUB_TOKEN=true)
  * Note: Uses 'room' parameter (not 'gameId') to match server expectations
  */
 function buildWsUrl(hub, gameId, token) {
@@ -208,12 +210,11 @@ function buildWsUrl(hub, gameId, token) {
   }
   u.searchParams.set("room", room);
   
-  // Add token (required for authentication) - validate it's not empty
+  // Add token only if provided (optional for subscribers by default)
   const tokenValue = String(token || "").trim();
-  if (!tokenValue) {
-    throw new Error("Missing or empty token");
+  if (tokenValue) {
+    u.searchParams.set("token", tokenValue);
   }
-  u.searchParams.set("token", tokenValue);
   return u.toString();
 }
 
@@ -272,7 +273,7 @@ function connect(opts = {}) {
   const gameId = extractGameId(els.gameIdInput.value);
   const token = els.tokenInput.value.trim();
 
-  // Validate all required fields are present and non-empty
+  // Validate required fields (hub and gameId are required; token is optional)
   if (!hub) {
     appendLog({
       kind: "error",
@@ -295,16 +296,8 @@ function connect(opts = {}) {
     return;
   }
 
-  if (!token) {
-    appendLog({
-      kind: "error",
-      time: Date.now(),
-      cardsText: "—",
-      raw: JSON.stringify({ error: "Missing or empty token - ensure token matches HUB_TOKEN from Render" }, null, 2),
-    });
-    setStatus("disconnected");
-    return;
-  }
+  // Token is optional - subscribers don't need it by default
+  // Only required if hub has REQUIRE_SUB_TOKEN=true
 
   const configKey = currentConfigKey();
   lastConfigKey = configKey;
@@ -319,12 +312,12 @@ function connect(opts = {}) {
   try {
     url = buildWsUrl(hub, gameId, token);
     // Log the constructed URL for debugging (without exposing full token)
-    const urlForLog = url.replace(/token=([^&]+)/, 'token=***');
+    const urlForLog = token ? url.replace(/token=([^&]+)/, 'token=***') : url;
     appendLog({
       kind: "message",
       time: Date.now(),
       cardsText: "Connecting...",
-      raw: JSON.stringify({ action: "connect", url: urlForLog, room: gameId }, null, 2),
+      raw: JSON.stringify({ action: "connect", url: urlForLog, room: gameId, hasToken: !!token }, null, 2),
     });
   } catch (e) {
     appendLog({
@@ -374,14 +367,92 @@ function connect(opts = {}) {
 
   ws.onclose = (evt) => {
     ws = null;
+    const code = evt.code;
+    const reason = evt.reason || "";
+
+    // Handle specific hub error codes
+    switch (code) {
+      case 4001:
+        appendLog({
+          kind: "error",
+          time: Date.now(),
+          cardsText: "(close 4001)",
+          raw: JSON.stringify({ event: "close", code, reason: "Invalid role parameter", detail: reason }, null, 2),
+        });
+        break;
+      case 4002:
+        appendLog({
+          kind: "error",
+          time: Date.now(),
+          cardsText: "(close 4002)",
+          raw: JSON.stringify({ 
+            event: "close", 
+            code, 
+            reason: "Invalid or missing token", 
+            detail: reason,
+            hint: "Hub may require REQUIRE_SUB_TOKEN=true. Add a valid JWT token and retry."
+          }, null, 2),
+        });
+        break;
+      case 4003:
+        appendLog({
+          kind: "error",
+          time: Date.now(),
+          cardsText: "(close 4003)",
+          raw: JSON.stringify({ 
+            event: "close", 
+            code, 
+            reason: "Token expired", 
+            detail: reason,
+            hint: "Fetch a new JWT token if required. Auto-reconnecting..."
+          }, null, 2),
+        });
+        break;
+      case 4004:
+        appendLog({
+          kind: "error",
+          time: Date.now(),
+          cardsText: "(close 4004)",
+          raw: JSON.stringify({ 
+            event: "close", 
+            code, 
+            reason: "Token claim mismatch (room/role)", 
+            detail: reason,
+            hint: "JWT claims don't match the requested room or role."
+          }, null, 2),
+        });
+        break;
+      default:
+        if (code !== 1000) {
+          appendLog({
+            kind: "info",
+            time: Date.now(),
+            cardsText: `(close ${code})`,
+            raw: JSON.stringify({ event: "close", code, reason: reason || "Connection closed" }, null, 2),
+          });
+        }
+    }
 
     if (manualDisconnect) {
       setStatus("disconnected");
       return;
     }
 
-    setStatus("reconnecting");
+    // Don't auto-reconnect for certain error codes
+    if (code === 4001 || code === 4004) {
+      // Invalid role or claim mismatch - user needs to fix config
+      setStatus("disconnected");
+      return;
+    }
 
+    if (code === 4002) {
+      // Token required but not provided or invalid - user may need to add token
+      setStatus("disconnected");
+      return;
+    }
+
+    // For 4003 (token expired) and other codes, attempt reconnect
+    setStatus("reconnecting");
     scheduleReconnect();
   };
 }
@@ -815,13 +886,14 @@ function scheduleConfigReconnect() {
     if ((isActive || isPendingReconnect) && key !== lastConfigKey) {
       const hub = els.hubInput.value.trim();
       const gameId = extractGameId(els.gameIdInput.value);
-      const token = els.tokenInput.value.trim();
+      // Token is optional now
 
       lastConfigKey = key;
       manualDisconnect = false;
       safeCleanupWs();
       // If config is currently incomplete (user is editing), just stop; they can connect once complete.
-      if (hub && gameId && token) {
+      // Only hub and gameId are required; token is optional
+      if (hub && gameId) {
         connect({ isAuto: true });
       } else {
         setStatus("disconnected");
@@ -845,7 +917,8 @@ function prefillFromQueryParamsAndAutoconnect() {
 
     lastConfigKey = currentConfigKey();
 
-    if (hub && gameId && token) {
+    // Auto-connect if hub and gameId are provided (token is optional)
+    if (hub && gameId) {
       connect({ isAuto: true });
     }
   } catch {

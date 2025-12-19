@@ -47,8 +47,9 @@
           </div>
 
           <div class="field">
-            <label for="tokenInput">Token</label>
-            <input id="tokenInput" type="password" spellcheck="false" placeholder="HUB_TOKEN" autocomplete="off" />
+            <label for="tokenInput">Token <span class="optional">(optional)</span></label>
+            <input id="tokenInput" type="password" spellcheck="false" placeholder="JWT token (if required by hub)" autocomplete="off" />
+            <div class="hint">Only needed if hub has REQUIRE_SUB_TOKEN=true</div>
           </div>
 
           <div class="actions">
@@ -129,7 +130,7 @@
       </section>
 
       <footer class="footer">
-        <span class="muted">Tip: open with query params <code>?hub=...&amp;gameId=...&amp;token=...</code> to auto-connect.</span>
+        <span class="muted">Tip: open with query params <code>?hub=...&amp;gameId=...</code> to auto-connect. Add <code>&amp;token=...</code> if required by hub.</span>
       </footer>
     </div>
 
