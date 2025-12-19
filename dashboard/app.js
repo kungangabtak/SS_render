@@ -25,6 +25,9 @@ let lastWasAutoReconnect = false;
 let configDebounceTimer = null;
 let renderDebounceTimer = null;
 
+/** Track if last connection attempt used a token (for token expiry handling) */
+let lastConnectionUsedToken = false;
+
 // ============================================================
 // Multi-Publisher Store
 // ============================================================
@@ -298,6 +301,9 @@ function connect(opts = {}) {
 
   // Token is optional - subscribers don't need it by default
   // Only required if hub has REQUIRE_SUB_TOKEN=true
+  
+  // Track if this connection uses a token (for expiry handling)
+  lastConnectionUsedToken = !!token;
 
   const configKey = currentConfigKey();
   lastConfigKey = configKey;
@@ -395,18 +401,41 @@ function connect(opts = {}) {
         });
         break;
       case 4003:
-        appendLog({
-          kind: "error",
-          time: Date.now(),
-          cardsText: "(close 4003)",
-          raw: JSON.stringify({ 
-            event: "close", 
-            code, 
-            reason: "Token expired", 
-            detail: reason,
-            hint: "Fetch a new JWT token if required. Auto-reconnecting..."
-          }, null, 2),
-        });
+        // Token expired - handle based on whether we used a token
+        if (lastConnectionUsedToken) {
+          appendLog({
+            kind: "error",
+            time: Date.now(),
+            cardsText: "(close 4003)",
+            raw: JSON.stringify({ 
+              event: "close", 
+              code, 
+              reason: "Token expired", 
+              detail: reason,
+              action: "Please enter a new JWT token and click Connect.",
+              hint: "Your token has expired. Get a new token from the authenticator service."
+            }, null, 2),
+          });
+          // Clear the expired token and highlight the field
+          els.tokenInput.value = "";
+          els.tokenInput.classList.add("token-expired");
+          els.tokenInput.placeholder = "Token expired — enter new JWT";
+          // Focus the token input to draw attention
+          els.tokenInput.focus();
+        } else {
+          appendLog({
+            kind: "error",
+            time: Date.now(),
+            cardsText: "(close 4003)",
+            raw: JSON.stringify({ 
+              event: "close", 
+              code, 
+              reason: "Token expired (unexpected - no token was sent)", 
+              detail: reason,
+              hint: "Hub reported token expiry but no token was used. Will retry without token."
+            }, null, 2),
+          });
+        }
         break;
       case 4004:
         appendLog({
@@ -451,7 +480,22 @@ function connect(opts = {}) {
       return;
     }
 
-    // For 4003 (token expired) and other codes, attempt reconnect
+    if (code === 4003) {
+      // Token expired
+      if (lastConnectionUsedToken) {
+        // We had a token that expired - user must provide new token
+        // Don't auto-reconnect as it would fail with the same expired token
+        setStatus("disconnected");
+        return;
+      } else {
+        // No token was used, this is unexpected - try reconnecting without token
+        setStatus("reconnecting");
+        scheduleReconnect();
+        return;
+      }
+    }
+
+    // For other unexpected close codes, attempt reconnect
     setStatus("reconnecting");
     scheduleReconnect();
   };
@@ -522,33 +566,12 @@ function extractHandFields(msg) {
 // Multi-Publisher Message Handling
 // ============================================================
 
-function handleIncomingMessage(raw) {
-  const receivedAt = Date.now();
-
-  if (typeof raw !== "string") {
-    appendLog({
-      kind: "error",
-      time: receivedAt,
-      cardsText: "—",
-      raw: JSON.stringify({ error: "Non-text WS message", receivedType: typeof raw }, null, 2),
-    });
-    return;
-  }
-
-  /** @type {any} */
-  let msg;
-  try {
-    msg = JSON.parse(raw);
-  } catch (e) {
-    appendLog({
-      kind: "error",
-      time: receivedAt,
-      cardsText: "(parse error)",
-      raw: JSON.stringify({ error: "JSON parse failed", detail: String(e), payload: raw }, null, 2),
-    });
-    return;
-  }
-
+/**
+ * Process a single message and update publishers store
+ * @param {any} msg - Parsed message object
+ * @param {number} receivedAt - Timestamp when message was received
+ */
+function processMessage(msg, receivedAt) {
   // Extract publisherId (required); fall back to "unknown" if missing
   const publisherId = msg.publisherId || "unknown";
   const playerName = msg.playerName || null;
@@ -590,6 +613,63 @@ function handleIncomingMessage(raw) {
     raw: prettyJson(msg),
     publisherId: publisherId,
   });
+}
+
+function handleIncomingMessage(raw) {
+  const receivedAt = Date.now();
+
+  if (typeof raw !== "string") {
+    appendLog({
+      kind: "error",
+      time: receivedAt,
+      cardsText: "—",
+      raw: JSON.stringify({ error: "Non-text WS message", receivedType: typeof raw }, null, 2),
+    });
+    return;
+  }
+
+  /** @type {any} */
+  let msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch (e) {
+    appendLog({
+      kind: "error",
+      time: receivedAt,
+      cardsText: "(parse error)",
+      raw: JSON.stringify({ error: "JSON parse failed", detail: String(e), payload: raw }, null, 2),
+    });
+    return;
+  }
+
+  // Handle snapshot messages (sent by hub on initial connect)
+  // Snapshot contains multiple messages keyed by type in the data object
+  if (msg.type === "snapshot" && msg.data && typeof msg.data === "object") {
+    appendLog({
+      kind: "info",
+      time: receivedAt,
+      cardsText: "[snapshot]",
+      raw: JSON.stringify({ 
+        event: "snapshot", 
+        messageCount: Object.keys(msg.data).length,
+        types: Object.keys(msg.data)
+      }, null, 2),
+    });
+
+    // Process each message in the snapshot
+    Object.entries(msg.data).forEach(([type, subMsg]) => {
+      if (subMsg && typeof subMsg === "object") {
+        processMessage(subMsg, receivedAt);
+      }
+    });
+
+    // Schedule a debounced re-render
+    scheduleRender();
+    return;
+  }
+
+  // Handle regular messages
+  processMessage(msg, receivedAt);
 
   // Schedule a debounced re-render
   scheduleRender();
@@ -680,7 +760,11 @@ function renderPublishersUI() {
           const { value1, suit1, value2, suit2, ts } = extractHandFields(handMsg);
           const hasCards = value1 && suit1 && value2 && suit2;
           if (hasCards) {
-            handPreview.innerHTML = `<span class="cards">${formatTwoCards(value1, suit1, value2, suit2)}</span>`;
+            // Use textContent to prevent XSS - create span element safely
+            const cardsSpan = document.createElement("span");
+            cardsSpan.className = "cards";
+            cardsSpan.textContent = formatTwoCards(value1, suit1, value2, suit2);
+            handPreview.appendChild(cardsSpan);
           } else {
             handPreview.textContent = "No cards";
           }
@@ -941,6 +1025,11 @@ setInterval(() => {
 // ============================================================
 els.connectBtn.addEventListener("click", () => {
   lastWasAutoReconnect = false;
+  // Clear token-expired state on manual connect attempt
+  if (els.tokenInput.classList.contains("token-expired")) {
+    els.tokenInput.classList.remove("token-expired");
+    els.tokenInput.placeholder = "JWT token (if required by hub)";
+  }
   connect({ isAuto: false });
 });
 
@@ -961,10 +1050,17 @@ els.gameIdInput.addEventListener("input", () => {
   scheduleConfigReconnect();
 });
 
-[els.hubInput, els.tokenInput].forEach((input) => {
-  input.addEventListener("input", () => {
-    scheduleConfigReconnect();
-  });
+els.hubInput.addEventListener("input", () => {
+  scheduleConfigReconnect();
+});
+
+els.tokenInput.addEventListener("input", () => {
+  // Clear token-expired state when user starts typing a new token
+  if (els.tokenInput.classList.contains("token-expired")) {
+    els.tokenInput.classList.remove("token-expired");
+    els.tokenInput.placeholder = "JWT token (if required by hub)";
+  }
+  scheduleConfigReconnect();
 });
 
 // ============================================================
