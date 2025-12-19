@@ -6,7 +6,8 @@ A minimal **vanilla HTML/CSS/JS** dashboard that connects to your Render WebSock
 
 This dashboard now supports **multiple publishers** (multiple people running the Chrome extension in the same PokerNow room). Features include:
 
-- **Publishers Panel**: Shows all active publishers with their short ID, last seen time, and latest hand preview
+- **Publishers Panel**: Shows all active publishers with their player name, PokerNow player ID, last seen time, and latest hand preview
+- **Player Names**: Displays the player's actual PokerNow display name (e.g., "Kunga") instead of just an ID
 - **Click to Select**: Click any publisher card to view their detailed data
 - **Auto-Selection**: Automatically selects the most recently seen publisher
 - **JSON Viewer**: View all message types (hand, state, etc.) from the selected publisher
@@ -59,11 +60,12 @@ That's it — Render will serve `dashboard/index.html`.
 
 ## Message Format
 
-The Chrome extension publisher includes a `publisherId` field on every hub message at the top level:
+The Chrome extension publisher includes `publisherId` and `playerName` fields on every hub message at the top level:
 
 ```json
 {
-  "publisherId": "abc123def456...",
+  "publisherId": "449iYoPwk6",
+  "playerName": "Kunga",
   "type": "hand",
   "data": {
     "value1": "J",
@@ -76,6 +78,16 @@ The Chrome extension publisher includes a `publisherId` field on every hub messa
   "timestamp": 1702847123456
 }
 ```
+
+### Field Descriptions
+
+| Field | Description |
+|-------|-------------|
+| `publisherId` | The PokerNow player ID extracted from the page (e.g., `449iYoPwk6` from `/players/449iYoPwk6`). Falls back to a generated UUID if the player ID cannot be extracted. |
+| `playerName` | The player's display name as shown on PokerNow (e.g., `Kunga`). |
+| `type` | Message type: `hand` for hole cards, `state` for game state, etc. |
+| `data` | Message payload (varies by type). |
+| `timestamp` | Unix timestamp in milliseconds. |
 
 Messages without a `publisherId` are bucketed under `"unknown"`.
 
@@ -102,8 +114,9 @@ The status badge shows:
 
 - The UI shows:
   - Connection status (connected / disconnected / reconnecting)
-  - Publishers panel with all active extension instances
+  - Publishers panel with all active extension instances, showing player names and PokerNow IDs
   - Latest two card tiles for selected publisher using suit symbols (♥ ♦ ♣ ♠)
+  - Selected publisher info with player name (e.g., "Kunga (449iYoPw)")
   - JSON viewer showing all message types from selected publisher
   - Last update time (prefers `data.timestamp`, falls back to top-level `timestamp`)
   - Table URL link (`data.url`) when present

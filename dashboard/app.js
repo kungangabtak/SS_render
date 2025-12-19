@@ -27,8 +27,8 @@ let renderDebounceTimer = null;
 // ============================================================
 // Multi-Publisher Store
 // ============================================================
-// publishers[publisherId] = { lastSeen: number, latestByType: { [type]: fullMessage } }
-/** @type {Record<string, { lastSeen: number, latestByType: Record<string, any> }>} */
+// publishers[publisherId] = { lastSeen: number, playerName: string|null, latestByType: { [type]: fullMessage } }
+/** @type {Record<string, { lastSeen: number, playerName: string|null, latestByType: Record<string, any> }>} */
 const publishers = {};
 
 /** Currently selected publisher ID (null = auto-select most recent) */
@@ -480,16 +480,22 @@ function handleIncomingMessage(raw) {
 
   // Extract publisherId (required); fall back to "unknown" if missing
   const publisherId = msg.publisherId || "unknown";
+  const playerName = msg.playerName || null;
   const msgType = msg.type || "unknown";
 
   // Update publishers store
   if (!publishers[publisherId]) {
     publishers[publisherId] = {
       lastSeen: receivedAt,
+      playerName: playerName,
       latestByType: {},
     };
   }
   publishers[publisherId].lastSeen = receivedAt;
+  // Update playerName if provided (may change during session)
+  if (playerName) {
+    publishers[publisherId].playerName = playerName;
+  }
   publishers[publisherId].latestByType[msgType] = msg;
 
   // For log display
@@ -580,10 +586,15 @@ function renderPublishersUI() {
         card.className = `pubCard${isSelected ? " selected" : ""}`;
         card.dataset.pubId = id;
 
-        // Publisher ID (shortened)
+        // Player name (if available) or Publisher ID (shortened)
+        const nameSpan = document.createElement("div");
+        nameSpan.className = "pubName";
+        nameSpan.textContent = pub.playerName || shortenId(id);
+
+        // Publisher ID (shortened) - shown below name if name exists
         const idSpan = document.createElement("div");
         idSpan.className = "pubId";
-        idSpan.textContent = shortenId(id);
+        idSpan.textContent = pub.playerName ? `ID: ${shortenId(id)}` : "";
 
         // Last seen
         const seenSpan = document.createElement("div");
@@ -606,7 +617,10 @@ function renderPublishersUI() {
           handPreview.textContent = "No hand data";
         }
 
-        card.appendChild(idSpan);
+        card.appendChild(nameSpan);
+        if (pub.playerName) {
+          card.appendChild(idSpan);
+        }
         card.appendChild(seenSpan);
         card.appendChild(handPreview);
 
@@ -629,7 +643,11 @@ function renderPublishersUI() {
 
     // Update selected publisher info
     if (els.selectedPublisherId) {
-      els.selectedPublisherId.textContent = shortenId(effectiveId);
+      // Show player name with ID, or just ID if no name
+      const displayText = pub.playerName 
+        ? `${pub.playerName} (${shortenId(effectiveId)})`
+        : shortenId(effectiveId);
+      els.selectedPublisherId.textContent = displayText;
     }
     if (els.selectedPublisherLastSeen) {
       els.selectedPublisherLastSeen.textContent = formatSecondsAgo(pub.lastSeen);

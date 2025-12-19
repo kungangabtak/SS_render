@@ -258,12 +258,21 @@ code {
   border-color: var(--cyan);
 }
 
-.pubId {
+.pubName {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+
+.pubId {
+  font-weight: 500;
+  font-size: 11px;
   color: var(--cyan);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   letter-spacing: 0.3px;
+  margin-top: 2px;
+  opacity: 0.8;
 }
 
 .pubLastSeen {
