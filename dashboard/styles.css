@@ -144,13 +144,18 @@ h2 {
   user-select: none;
 }
 
-/* Hide invite code field by default (shown only when auto-fetch is enabled) */
-#inviteCodeField {
+/* Hide password field by default (shown only when Private Mode is enabled) */
+#passwordField {
   display: none;
 }
 
-#inviteCodeField.visible {
+#passwordField.visible {
   display: block;
+}
+
+/* Hide token field when Private Mode is enabled */
+#tokenField.hidden-field {
+  display: none;
 }
 
 .field input {

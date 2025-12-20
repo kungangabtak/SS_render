@@ -28,9 +28,20 @@ let renderDebounceTimer = null;
 /** Track if last connection attempt used a token (for token expiry handling) */
 let lastConnectionUsedToken = false;
 
+/** Track if last connection was in Private Mode (for 4003 auto-reconnect) */
+let lastConnectionPrivateMode = false;
+
+/** Current room for reconnection */
+let currentRoom = "";
+
 /** Auth service configuration */
 const AUTH_SERVICE_URL = "https://dom-auth.onrender.com/token";
-const DEFAULT_INVITE_CODE = "91175076b507402075f4b9395476a92d"; // Default invite code
+
+/** Settings storage key */
+const SETTINGS_KEY = "ss_settings_v1";
+
+/** Guard to prevent re-auth reconnect loops on token expiry (4003) */
+let reAuthInFlight = false;
 
 // ============================================================
 // Multi-Publisher Store
@@ -49,8 +60,10 @@ const els = {
   hubInput: document.getElementById("hubInput"),
   gameIdInput: document.getElementById("gameIdInput"),
   tokenInput: document.getElementById("tokenInput"),
-  inviteCodeInput: document.getElementById("inviteCodeInput"),
-  autoFetchCheckbox: document.getElementById("autoFetchCheckbox"),
+  privateModeCheckbox: document.getElementById("privateModeCheckbox"),
+  dashboardPasswordInput: document.getElementById("dashboardPasswordInput"),
+  passwordField: document.getElementById("passwordField"),
+  tokenField: document.getElementById("tokenField"),
 
   connectBtn: document.getElementById("connectBtn"),
   disconnectBtn: document.getElementById("disconnectBtn"),
@@ -171,7 +184,7 @@ function updateQueryStringFromInputs() {
     const url = new URL(window.location.href);
     const hub = els.hubInput.value.trim();
     const gameId = extractGameId(els.gameIdInput.value);
-    const token = els.tokenInput.value.trim();
+    const privateMode = els.privateModeCheckbox?.checked ?? false;
 
     if (hub) url.searchParams.set("hub", hub);
     else url.searchParams.delete("hub");
@@ -179,8 +192,14 @@ function updateQueryStringFromInputs() {
     if (gameId) url.searchParams.set("gameId", gameId);
     else url.searchParams.delete("gameId");
 
-    if (token) url.searchParams.set("token", token);
-    else url.searchParams.delete("token");
+    // Never leak token into URL in Private Mode
+    if (privateMode) {
+      url.searchParams.delete("token");
+    } else {
+      const token = els.tokenInput.value.trim();
+      if (token) url.searchParams.set("token", token);
+      else url.searchParams.delete("token");
+    }
 
     window.history.replaceState({}, "", url.toString());
   } catch {
@@ -189,37 +208,122 @@ function updateQueryStringFromInputs() {
 }
 
 function currentConfigKey() {
-  return `${els.hubInput.value.trim()}|${extractGameId(els.gameIdInput.value)}|${els.tokenInput.value.trim()}|${els.autoFetchCheckbox?.checked}`;
+  const privateMode = els.privateModeCheckbox?.checked ?? false;
+  // In Private Mode, ignore token (it's fetched dynamically, not user input)
+  if (privateMode) {
+    return `${els.hubInput.value.trim()}|${extractGameId(els.gameIdInput.value)}|private`;
+  }
+  return `${els.hubInput.value.trim()}|${extractGameId(els.gameIdInput.value)}|${els.tokenInput.value.trim()}|public`;
+}
+
+// ============================================================
+// Settings (persist ONLY privateMode)
+// ============================================================
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return { privateMode: false };
+    const parsed = JSON.parse(raw);
+    return { privateMode: Boolean(parsed && parsed.privateMode) };
+  } catch {
+    return { privateMode: false };
+  }
+}
+
+function saveSettings() {
+  try {
+    const privateMode = els.privateModeCheckbox?.checked ?? false;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ privateMode: Boolean(privateMode) }));
+  } catch {
+    // ignore
+  }
+}
+
+function applySettings() {
+  const settings = loadSettings();
+  if (els.privateModeCheckbox) {
+    els.privateModeCheckbox.checked = Boolean(settings.privateMode);
+  }
+
+  // Password is never persisted; ensure blank on load.
+  if (els.dashboardPasswordInput) {
+    els.dashboardPasswordInput.value = "";
+  }
+
+  updatePrivateModeUI();
 }
 
 /**
- * Auto-fetch subscriber token from dom_auth service
- * @param {string} roomId - The room/game ID
- * @param {string} inviteCode - Invite code for authentication
- * @returns {Promise<string>} JWT token
+ * Update UI visibility based on Private Mode state
  */
-async function getSubscriberToken(roomId, inviteCode) {
-  appendLog({
-    kind: "info",
-    time: Date.now(),
-    cardsText: "[auth]",
-    raw: JSON.stringify({ event: "Fetching token from auth service...", roomId }, null, 2),
-  });
+function updatePrivateModeUI() {
+  const privateMode = els.privateModeCheckbox?.checked ?? false;
+  if (els.passwordField) {
+    els.passwordField.classList.toggle("visible", privateMode);
+  }
+  // Token field visibility: show only in non-private mode or for debugging
+  if (els.tokenField) {
+    els.tokenField.classList.toggle("hidden-field", privateMode);
+  }
+
+  // In Private Mode, manual token override is ignored.
+  if (els.tokenInput) {
+    els.tokenInput.disabled = privateMode;
+    if (privateMode) {
+      els.tokenInput.value = "";
+      if (els.tokenInput.classList.contains("token-expired")) {
+        els.tokenInput.classList.remove("token-expired");
+        els.tokenInput.placeholder = "JWT token (auto-managed in Private Mode)";
+      }
+    } else {
+      els.tokenInput.placeholder = "JWT token (if required by hub)";
+    }
+  }
+}
+
+/**
+ * Fetch subscriber token from dom_auth service using password authentication
+ * @param {string} roomId - The room/game ID
+ * @param {string} password - Dashboard password for authentication
+ * @returns {Promise<{ token: string, expiresInSeconds: number | undefined }>} Token and expiry info
+ * @throws {Error} With status code info (401 for wrong password, etc.)
+ */
+async function getSubscriberToken(roomId, password) {
+  const pw = String(password || "").trim();
+  if (!pw) {
+    throw new Error("Missing password");
+  }
 
   try {
     const response = await fetch(AUTH_SERVICE_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Dashboard-Password': pw
+      },
       body: JSON.stringify({
         room: roomId,
-        role: 'sub',  // Subscriber role
-        inviteCode: inviteCode || DEFAULT_INVITE_CODE
+        role: 'sub'  // Subscriber role
       })
     });
     
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Token request failed: ${response.status} - ${errorText}`);
+      if (response.status === 401) {
+        throw new Error('Unauthorized (wrong password)');
+      }
+      let errMsg = "";
+      try {
+        const errJson = await response.json();
+        errMsg = (errJson && (errJson.error || errJson.message)) ? String(errJson.error || errJson.message) : "";
+      } catch {
+        try {
+          errMsg = await response.text();
+        } catch {
+          errMsg = "";
+        }
+      }
+      throw new Error(errMsg || `Auth failed (${response.status})`);
     }
     
     const data = await response.json();
@@ -228,28 +332,8 @@ async function getSubscriberToken(roomId, inviteCode) {
       throw new Error('No token in response');
     }
 
-    appendLog({
-      kind: "info",
-      time: Date.now(),
-      cardsText: "[auth]",
-      raw: JSON.stringify({ 
-        event: "Token fetched successfully",
-        expiresIn: data.expiresIn || "unknown"
-      }, null, 2),
-    });
-
-    return data.token;
+    return { token: data.token, expiresInSeconds: data.expiresInSeconds };
   } catch (error) {
-    appendLog({
-      kind: "error",
-      time: Date.now(),
-      cardsText: "[auth error]",
-      raw: JSON.stringify({ 
-        event: "Failed to fetch token",
-        error: error.message,
-        hint: "Check invite code and auth service availability"
-      }, null, 2),
-    });
     throw error;
   }
 }
@@ -339,64 +423,11 @@ function scheduleReconnect() {
   }, delay);
 }
 
-async function connect(opts = {}) {
-  const hub = els.hubInput.value.trim();
-  const gameId = extractGameId(els.gameIdInput.value);
-  let token = els.tokenInput.value.trim();
-  const autoFetch = els.autoFetchCheckbox?.checked ?? false;
-  const inviteCode = els.inviteCodeInput?.value?.trim() || DEFAULT_INVITE_CODE;
-
-  // Validate required fields (hub and gameId are required; token is optional)
-  if (!hub) {
-    appendLog({
-      kind: "error",
-      time: Date.now(),
-      cardsText: "—",
-      raw: JSON.stringify({ error: "Missing hub URL" }, null, 2),
-    });
-    setStatus("disconnected");
-    return;
-  }
-
-  if (!gameId) {
-    appendLog({
-      kind: "error",
-      time: Date.now(),
-      cardsText: "—",
-      raw: JSON.stringify({ error: "Missing gameId/room" }, null, 2),
-    });
-    setStatus("disconnected");
-    return;
-  }
-
-  // Auto-fetch token if enabled and no manual token provided
-  if (autoFetch && !token) {
-    try {
-      setStatus("reconnecting"); // Show connecting status during fetch
-      token = await getSubscriberToken(gameId, inviteCode);
-      // Update the token input with fetched token (masked)
-      els.tokenInput.value = token;
-    } catch (error) {
-      appendLog({
-        kind: "error",
-        time: Date.now(),
-        cardsText: "—",
-        raw: JSON.stringify({ 
-          error: "Failed to auto-fetch token", 
-          detail: error.message,
-          hint: "Uncheck 'Auto-fetch token' to connect without token, or verify invite code"
-        }, null, 2),
-      });
-      setStatus("disconnected");
-      return;
-    }
-  }
-
-  // Token is optional - subscribers don't need it by default
-  // Only required if hub has REQUIRE_SUB_TOKEN=true
-  
-  // Track if this connection uses a token (for expiry handling)
+function openWebSocketConnection({ hub, room, token, privateMode }) {
+  // Track connection state for expiry handling
   lastConnectionUsedToken = !!token;
+  lastConnectionPrivateMode = !!privateMode;
+  currentRoom = room;
 
   const configKey = currentConfigKey();
   lastConfigKey = configKey;
@@ -409,14 +440,14 @@ async function connect(opts = {}) {
 
   let url;
   try {
-    url = buildWsUrl(hub, gameId, token);
+    url = buildWsUrl(hub, room, token);
     // Log the constructed URL for debugging (without exposing full token)
-    const urlForLog = token ? url.replace(/token=([^&]+)/, 'token=***') : url;
+    const urlForLog = token ? url.replace(/token=([^&]+)/, "token=***") : url;
     appendLog({
       kind: "message",
       time: Date.now(),
       cardsText: "Connecting...",
-      raw: JSON.stringify({ action: "connect", url: urlForLog, room: gameId, hasToken: !!token }, null, 2),
+      raw: JSON.stringify({ action: "connect", url: urlForLog, room: room, hasToken: !!token }, null, 2),
     });
   } catch (e) {
     appendLog({
@@ -484,86 +515,57 @@ async function connect(opts = {}) {
           kind: "error",
           time: Date.now(),
           cardsText: "(close 4002)",
-          raw: JSON.stringify({ 
-            event: "close", 
-            code, 
-            reason: "Invalid or missing token", 
-            detail: reason,
-            hint: "Hub may require REQUIRE_SUB_TOKEN=true. Add a valid JWT token and retry."
-          }, null, 2),
+          raw: JSON.stringify(
+            {
+              event: "close",
+              code,
+              reason: "Invalid or missing token",
+              detail: reason,
+              hint: lastConnectionPrivateMode
+                ? "Authentication failed. Double-check your password and try again."
+                : "Hub requires auth. Enable Private Mode.",
+            },
+            null,
+            2
+          ),
         });
         break;
       case 4003:
-        // Token expired - handle based on whether we used a token and auto-fetch setting
-        if (lastConnectionUsedToken) {
-          const autoFetch = els.autoFetchCheckbox?.checked ?? false;
-          
-          if (autoFetch) {
-            // Auto-fetch enabled - will fetch new token and reconnect
-            appendLog({
-              kind: "info",
-              time: Date.now(),
-              cardsText: "(close 4003)",
-              raw: JSON.stringify({ 
-                event: "close", 
-                code, 
-                reason: "Token expired", 
-                detail: reason,
-                action: "Auto-fetching new token and reconnecting..."
-              }, null, 2),
-            });
-            // Clear expired token
-            els.tokenInput.value = "";
-            // Don't set expired state - we'll auto-reconnect with new token
-          } else {
-            // Manual token mode - user needs to provide new token
-            appendLog({
-              kind: "error",
-              time: Date.now(),
-              cardsText: "(close 4003)",
-              raw: JSON.stringify({ 
-                event: "close", 
-                code, 
-                reason: "Token expired", 
-                detail: reason,
-                action: "Please enter a new JWT token and click Connect.",
-                hint: "Your token has expired. Get a new token or enable 'Auto-fetch token'."
-              }, null, 2),
-            });
-            // Clear the expired token and highlight the field
-            els.tokenInput.value = "";
-            els.tokenInput.classList.add("token-expired");
-            els.tokenInput.placeholder = "Token expired — enter new JWT";
-            // Focus the token input to draw attention
-            els.tokenInput.focus();
-          }
-        } else {
-          appendLog({
-            kind: "error",
-            time: Date.now(),
-            cardsText: "(close 4003)",
-            raw: JSON.stringify({ 
-              event: "close", 
-              code, 
-              reason: "Token expired (unexpected - no token was sent)", 
+        appendLog({
+          kind: lastConnectionPrivateMode ? "info" : "error",
+          time: Date.now(),
+          cardsText: "(close 4003)",
+          raw: JSON.stringify(
+            {
+              event: "close",
+              code,
+              reason: "Token expired",
               detail: reason,
-              hint: "Hub reported token expiry but no token was used. Will retry without token."
-            }, null, 2),
-          });
-        }
+              action: lastConnectionPrivateMode
+                ? "Re-authenticating and reconnecting (Private Mode)..."
+                : "Please enter a new JWT token and click Connect (or enable Private Mode).",
+            },
+            null,
+            2
+          ),
+        });
         break;
       case 4004:
         appendLog({
           kind: "error",
           time: Date.now(),
           cardsText: "(close 4004)",
-          raw: JSON.stringify({ 
-            event: "close", 
-            code, 
-            reason: "Token claim mismatch (room/role)", 
-            detail: reason,
-            hint: "JWT claims don't match the requested room or role."
-          }, null, 2),
+          raw: JSON.stringify(
+            {
+              event: "close",
+              code,
+              reason: "Token claim mismatch (room/role)",
+              detail: reason,
+              hint: "JWT claims don't match the requested room or role.",
+            },
+            null,
+            2
+          ),
         });
         break;
       default:
@@ -584,45 +586,179 @@ async function connect(opts = {}) {
 
     // Don't auto-reconnect for certain error codes
     if (code === 4001 || code === 4004) {
-      // Invalid role or claim mismatch - user needs to fix config
       setStatus("disconnected");
       return;
     }
 
     if (code === 4002) {
-      // Token required but not provided or invalid - user may need to add token
+      // Token required but not provided or invalid
       setStatus("disconnected");
       return;
     }
 
     if (code === 4003) {
       // Token expired
-      const autoFetch = els.autoFetchCheckbox?.checked ?? false;
-      
-      if (lastConnectionUsedToken) {
-        if (autoFetch) {
-          // Auto-fetch enabled - reconnect (will fetch new token automatically)
-          setStatus("reconnecting");
-          scheduleReconnect();
-          return;
-        } else {
-          // Manual token mode - user must provide new token
-          // Don't auto-reconnect as it would fail with the same expired token
-          setStatus("disconnected");
-          return;
-        }
-      } else {
-        // No token was used, this is unexpected - try reconnecting without token
-        setStatus("reconnecting");
-        scheduleReconnect();
+      if (lastConnectionPrivateMode) {
+        // Private Mode - re-auth and reconnect (guarded to prevent loops)
+        void reAuthAndReconnect();
         return;
       }
+
+      if (lastConnectionUsedToken) {
+        // Manual token - user must provide new token
+        setStatus("disconnected");
+        return;
+      }
+
+      // No token was used (unexpected) - try reconnecting without token
+      setStatus("reconnecting");
+      scheduleReconnect();
+      return;
     }
 
     // For other unexpected close codes, attempt reconnect
     setStatus("reconnecting");
     scheduleReconnect();
   };
+}
+
+async function reAuthAndReconnect() {
+  if (reAuthInFlight) return;
+  reAuthInFlight = true;
+
+  try {
+    if (manualDisconnect) return;
+    if (!(els.privateModeCheckbox?.checked ?? false)) return;
+
+    const hub = els.hubInput.value.trim();
+    const room = currentRoom || extractGameId(els.gameIdInput.value);
+    const pw = (els.dashboardPasswordInput?.value || "").trim();
+
+    if (!pw) {
+      appendLog({
+        kind: "error",
+        time: Date.now(),
+        cardsText: "—",
+        raw: JSON.stringify(
+          {
+            error: "Token expired but password is missing",
+            hint: "Enter Dashboard Password and click Connect (Private Mode).",
+          },
+          null,
+          2
+        ),
+      });
+      setStatus("disconnected");
+      return;
+    }
+
+    setStatus("reconnecting");
+    const auth = await getSubscriberToken(room, pw);
+    if (manualDisconnect) return;
+
+    openWebSocketConnection({ hub, room, token: auth.token, privateMode: true });
+  } catch (e) {
+    appendLog({
+      kind: "error",
+      time: Date.now(),
+      cardsText: "—",
+      raw: JSON.stringify(
+        {
+          error: "Re-auth failed",
+          detail: String(e && e.message ? e.message : e),
+          hint: String(e && e.message ? e.message : e).includes("Unauthorized")
+            ? "Unauthorized (wrong password)"
+            : "Network/auth service error. Try again.",
+        },
+        null,
+        2
+      ),
+    });
+    setStatus("disconnected");
+  } finally {
+    reAuthInFlight = false;
+  }
+}
+
+async function connect(opts = {}) {
+  const hub = els.hubInput.value.trim();
+  const gameId = extractGameId(els.gameIdInput.value);
+  const privateMode = els.privateModeCheckbox?.checked ?? false;
+
+  // Validate required fields (hub and gameId are required; token is optional)
+  if (!hub) {
+    appendLog({
+      kind: "error",
+      time: Date.now(),
+      cardsText: "—",
+      raw: JSON.stringify({ error: "Missing hub URL" }, null, 2),
+    });
+    setStatus("disconnected");
+    return;
+  }
+
+  if (!gameId) {
+    appendLog({
+      kind: "error",
+      time: Date.now(),
+      cardsText: "—",
+      raw: JSON.stringify({ error: "Missing gameId/room" }, null, 2),
+    });
+    setStatus("disconnected");
+    return;
+  }
+
+  // Store current room for potential reconnection
+  currentRoom = gameId;
+
+  // Private Mode: fetch token from auth service using password
+  if (privateMode) {
+    // Clear token input in private mode (token stays in memory only)
+    if (els.tokenInput) els.tokenInput.value = "";
+
+    // Require password (never persisted)
+    const pw = (els.dashboardPasswordInput?.value || "").trim();
+
+    if (!pw) {
+      appendLog({
+        kind: "error",
+        time: Date.now(),
+        cardsText: "—",
+        raw: JSON.stringify({ 
+          error: "Private Mode requires a password",
+          hint: "Enter your dashboard password to authenticate"
+        }, null, 2),
+      });
+      setStatus("disconnected");
+      return;
+    }
+
+    try {
+      setStatus("reconnecting"); // Show connecting status during fetch
+      const auth = await getSubscriberToken(gameId, pw);
+      openWebSocketConnection({ hub, room: gameId, token: auth.token, privateMode: true });
+    } catch (error) {
+      appendLog({
+        kind: "error",
+        time: Date.now(),
+        cardsText: "—",
+        raw: JSON.stringify({ 
+          error: "Failed to authenticate", 
+          detail: error.message,
+          hint: error.message.includes("Unauthorized") 
+            ? "Check your dashboard password" 
+            : "Disable Private Mode to connect without authentication"
+        }, null, 2),
+      });
+      setStatus("disconnected");
+      return;
+    }
+    return;
+  }
+
+  // Private Mode OFF: connect tokenless by default; token override remains optional.
+  const token = els.tokenInput.value.trim();
+  openWebSocketConnection({ hub, room: gameId, token, privateMode: false });
 }
 
 // ============================================================
@@ -1121,7 +1257,12 @@ function prefillFromQueryParamsAndAutoconnect() {
 
     if (hub) els.hubInput.value = hub;
     if (gameId) els.gameIdInput.value = gameId;
-    if (token) els.tokenInput.value = token;
+
+    // Only apply token param if NOT in Private Mode (avoid token leakage)
+    const privateMode = els.privateModeCheckbox?.checked ?? false;
+    if (token && !privateMode) {
+      els.tokenInput.value = token;
+    }
 
     lastConfigKey = currentConfigKey();
 
@@ -1187,17 +1328,12 @@ els.tokenInput.addEventListener("input", () => {
   scheduleConfigReconnect();
 });
 
-// Toggle invite code field visibility based on auto-fetch checkbox
-if (els.autoFetchCheckbox) {
-  els.autoFetchCheckbox.addEventListener("change", () => {
-    const inviteCodeField = document.getElementById("inviteCodeField");
-    if (inviteCodeField) {
-      if (els.autoFetchCheckbox.checked) {
-        inviteCodeField.classList.add("visible");
-      } else {
-        inviteCodeField.classList.remove("visible");
-      }
-    }
+// Toggle password field visibility based on Private Mode checkbox
+if (els.privateModeCheckbox) {
+  els.privateModeCheckbox.addEventListener("change", () => {
+    updatePrivateModeUI();
+    // Save setting to localStorage
+    saveSettings();
   });
 }
 
@@ -1209,5 +1345,8 @@ renderCards("—", "", "—", "");
 els.lastUpdate.textContent = "—";
 setTableUrl(null);
 renderPublishersUI();
+
+// Load and apply saved settings
+applySettings();
 
 prefillFromQueryParamsAndAutoconnect();

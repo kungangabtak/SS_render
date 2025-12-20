@@ -46,24 +46,24 @@
             <div class="hint">Paste full PokerNow URL or just the game ID</div>
           </div>
 
-          <div class="field">
-            <label for="tokenInput">Token <span class="optional">(optional)</span></label>
-            <input id="tokenInput" type="password" spellcheck="false" placeholder="JWT token (if required by hub)" autocomplete="off" />
-            <div class="hint">Only needed if hub has REQUIRE_SUB_TOKEN=true</div>
-          </div>
-
           <div class="field field-checkbox">
             <label class="checkbox-label">
-              <input type="checkbox" id="autoFetchCheckbox" />
-              <span>Auto-fetch token from auth service</span>
+              <input type="checkbox" id="privateModeCheckbox" />
+              <span>Private Mode</span>
             </label>
-            <div class="hint">Automatically fetches JWT tokens when needed</div>
+            <div class="hint">Requires password to authenticate with hub</div>
           </div>
 
-          <div class="field" id="inviteCodeField">
-            <label for="inviteCodeInput">Invite Code <span class="optional">(for auto-fetch)</span></label>
-            <input id="inviteCodeInput" type="text" spellcheck="false" placeholder="91175076b507402075f4b9395476a92d" autocomplete="off" />
-            <div class="hint">Required for token auto-fetch authentication</div>
+          <div class="field" id="passwordField">
+            <label for="dashboardPasswordInput">Dashboard Password</label>
+            <input id="dashboardPasswordInput" type="password" spellcheck="false" placeholder="Enter password" autocomplete="off" />
+            <div class="hint">Used to authenticate with dom_auth service</div>
+          </div>
+
+          <div class="field" id="tokenField">
+            <label for="tokenInput">Token <span class="optional">(optional, manual override)</span></label>
+            <input id="tokenInput" type="password" spellcheck="false" placeholder="JWT token (auto-managed in Private Mode)" autocomplete="off" />
+            <div class="hint">Auto-fetched in Private Mode; manual entry otherwise</div>
           </div>
 
           <div class="actions">
@@ -144,7 +144,7 @@
       </section>
 
       <footer class="footer">
-        <span class="muted">Tip: open with query params <code>?hub=...&amp;gameId=...</code> to auto-connect. Add <code>&amp;token=...</code> if required by hub.</span>
+        <span class="muted">Tip: open with query params <code>?hub=...&amp;gameId=...</code> to auto-connect. Enable Private Mode for password-protected hubs.</span>
       </footer>
     </div>
 

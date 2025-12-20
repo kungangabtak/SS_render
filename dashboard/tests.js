@@ -10,6 +10,9 @@ const mockDOM = {
   selectedPublisherId: null,
 };
 
+// Shared constants (should match app.js intent)
+const SETTINGS_KEY = "ss_settings_v1";
+
 // Test utilities
 function assert(condition, message) {
   if (!condition) {
@@ -21,6 +24,27 @@ function assertEqual(actual, expected, message) {
   if (actual !== expected) {
     throw new Error(message || `Expected ${expected}, got ${actual}`);
   }
+}
+
+function createMockLocalStorage() {
+  const store = {};
+  return {
+    getItem(key) {
+      return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null;
+    },
+    setItem(key, value) {
+      store[key] = String(value);
+    },
+    removeItem(key) {
+      delete store[key];
+    },
+    clear() {
+      Object.keys(store).forEach((k) => delete store[k]);
+    },
+    _dump() {
+      return { ...store };
+    },
+  };
 }
 
 // Test extractGameId logic
@@ -44,6 +68,28 @@ function testExtractGameId() {
   assertEqual(extractGameId(""), "", "Should return empty for empty input");
   
   console.log("✓ extractGameId tests passed");
+}
+
+// Test settings persistence does NOT store password
+function testSettingsDoesNotPersistPassword() {
+  console.log("Testing settings persistence does not store password...");
+
+  const ls = createMockLocalStorage();
+  const password = "super-secret-password";
+
+  function saveSettings(privateMode) {
+    // Mirrors app.js behavior: persist ONLY privateMode
+    ls.setItem(SETTINGS_KEY, JSON.stringify({ privateMode: Boolean(privateMode) }));
+  }
+
+  saveSettings(true);
+
+  const raw = ls.getItem(SETTINGS_KEY) || "";
+  assert(raw.includes("privateMode"), "Settings should include privateMode");
+  assert(!raw.toLowerCase().includes("password"), "Settings must not include password field");
+  assert(!raw.includes(password), "Settings must not include password value");
+
+  console.log("✓ Settings non-persistence tests passed");
 }
 
 // Test buildWsUrl logic
@@ -79,6 +125,107 @@ function testBuildWsUrl() {
   assert(url2.includes("token=abc123"), "Should include token when provided");
   
   console.log("✓ buildWsUrl tests passed");
+}
+
+// Test buildWsUrl with Private Mode (token included)
+function testBuildWsUrlPrivateMode() {
+  console.log("Testing buildWsUrl in Private Mode...");
+  
+  function buildWsUrl(hub, gameId, token) {
+    let hubStr = String(hub || "").trim();
+    if (!hubStr) throw new Error("Missing hub");
+    if (!/^wss?:\/\//i.test(hubStr)) {
+      hubStr = `wss://${hubStr}`;
+    }
+    const u = new URL(hubStr);
+    u.searchParams.set("role", "sub");
+    const room = String(gameId || "").trim();
+    if (!room) {
+      throw new Error("Missing room/gameId");
+    }
+    u.searchParams.set("room", room);
+    const tokenValue = String(token || "").trim();
+    if (tokenValue) {
+      u.searchParams.set("token", tokenValue);
+    }
+    return u.toString();
+  }
+  
+  // Simulate Private Mode: token fetched from auth service
+  const jwtToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb29tIjoicm9vbTEyMyIsInJvbGUiOiJzdWIifQ.fake";
+  const url = buildWsUrl("wss://dom-hub.onrender.com", "room123", jwtToken);
+  
+  assert(url.includes("role=sub"), "Private Mode URL should include role=sub");
+  assert(url.includes("room=room123"), "Private Mode URL should include room");
+  assert(url.includes("token="), "Private Mode URL should include token");
+  assert(url.includes(encodeURIComponent(jwtToken).substring(0, 20)), "Token should be URL-encoded");
+  
+  console.log("✓ buildWsUrl Private Mode tests passed");
+}
+
+// Test getSubscriberToken sends password header + maps 401 correctly
+async function testGetSubscriberTokenHeaderAnd401() {
+  console.log("Testing getSubscriberToken header + 401 mapping...");
+
+  const calls = [];
+
+  async function mockFetch(url, opts) {
+    calls.push({ url, opts });
+    // Default: succeed
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { token: "mock.jwt.token", expiresInSeconds: 60 };
+      },
+    };
+  }
+
+  async function getSubscriberToken(room, password, fetchImpl) {
+    const pw = String(password || "").trim();
+    if (!pw) throw new Error("Missing password");
+
+    const res = await fetchImpl("https://dom-auth.onrender.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Dashboard-Password": pw },
+      body: JSON.stringify({ room, role: "sub" }),
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) throw new Error("Unauthorized (wrong password)");
+      throw new Error(`Auth failed (${res.status})`);
+    }
+
+    const data = await res.json();
+    return { token: data.token, expiresInSeconds: data.expiresInSeconds };
+  }
+
+  // Header test (trim)
+  await getSubscriberToken("room123", "  pw  ", mockFetch);
+  assertEqual(calls.length, 1, "Should call fetch exactly once");
+  assertEqual(calls[0].opts.headers["X-Dashboard-Password"], "pw", "Should send trimmed X-Dashboard-Password header");
+
+  // 401 mapping test
+  async function mockFetch401() {
+    return {
+      ok: false,
+      status: 401,
+      async json() {
+        return { error: "Unauthorized" };
+      },
+    };
+  }
+
+  let threw = false;
+  try {
+    await getSubscriberToken("room123", "wrong", mockFetch401);
+  } catch (e) {
+    threw = true;
+    assertEqual(e.message, "Unauthorized (wrong password)", "401 should map to Unauthorized (wrong password)");
+  }
+  assert(threw, "Should throw for 401");
+
+  console.log("✓ getSubscriberToken header + 401 tests passed");
 }
 
 // Test snapshot message handling (CRITICAL - currently missing in app.js)
@@ -270,37 +417,37 @@ function testCardNormalization() {
   console.log("✓ Card normalization tests passed");
 }
 
-// Test token expiry handling
+// Test token expiry handling (4003) with Private Mode
 function testTokenExpiryLogic() {
   console.log("Testing token expiry logic...");
   
-  // Simulate 4003 handling with token (manual mode)
+  // Simulate 4003 handling with token (non-private mode)
   let lastConnectionUsedToken = true;
-  let autoFetch = false;
+  let lastConnectionPrivateMode = false;
   let shouldReconnect = false;
   
   const code = 4003;
   if (code === 4003) {
     if (lastConnectionUsedToken) {
-      if (autoFetch) {
-        shouldReconnect = true; // Auto-fetch will get new token
+      if (lastConnectionPrivateMode) {
+        shouldReconnect = true; // Private Mode will auto re-fetch token
       } else {
-        shouldReconnect = false; // Manual - user needs to provide token
+        shouldReconnect = false; // Manual token - user needs to provide new one
       }
     } else {
       shouldReconnect = true;
     }
   }
   
-  assert(shouldReconnect === false, "Should NOT reconnect when token was used and expired (manual mode)");
+  assert(shouldReconnect === false, "Should NOT reconnect when token expired in non-private mode");
   
-  // Simulate 4003 handling with token (auto-fetch mode)
-  autoFetch = true;
+  // Simulate 4003 handling with token (Private Mode)
+  lastConnectionPrivateMode = true;
   shouldReconnect = false;
   if (code === 4003) {
     if (lastConnectionUsedToken) {
-      if (autoFetch) {
-        shouldReconnect = true; // Auto-fetch will get new token
+      if (lastConnectionPrivateMode) {
+        shouldReconnect = true; // Private Mode will auto re-fetch token
       } else {
         shouldReconnect = false;
       }
@@ -309,13 +456,13 @@ function testTokenExpiryLogic() {
     }
   }
   
-  assert(shouldReconnect === true, "Should reconnect when token expired and auto-fetch enabled");
+  assert(shouldReconnect === true, "Should reconnect when token expired in Private Mode");
   
   // Simulate 4003 handling without token (unexpected case)
   lastConnectionUsedToken = false;
   if (code === 4003) {
     if (lastConnectionUsedToken) {
-      if (autoFetch) {
+      if (lastConnectionPrivateMode) {
         shouldReconnect = true;
       } else {
         shouldReconnect = false;
@@ -330,24 +477,129 @@ function testTokenExpiryLogic() {
   console.log("✓ Token expiry logic tests passed");
 }
 
-// Test auto-fetch token logic
-function testAutoFetchTokenLogic() {
-  console.log("Testing auto-fetch token logic...");
+// Test 4003 triggers re-auth and reconnect in Private Mode
+function testTokenExpiry4003Reconnect() {
+  console.log("Testing 4003 token expiry reconnect flow...");
   
-  // Mock fetch token function
-  async function mockGetSubscriberToken(roomId, inviteCode) {
-    assert(roomId, "roomId should be provided");
-    assert(inviteCode, "inviteCode should be provided");
-    return "mock-jwt-token-" + roomId;
+  // Simulate state tracking
+  let reconnectCalled = false;
+  let tokenFetchCalled = false;
+  
+  function simulateReconnectBehavior(closeCode, lastUsedToken, privateMode) {
+    if (closeCode === 4003) {
+      if (lastUsedToken && privateMode) {
+        // Private Mode: should trigger re-auth and reconnect
+        tokenFetchCalled = true;
+        reconnectCalled = true;
+        return { action: "reconnect", reAuth: true };
+      } else if (lastUsedToken && !privateMode) {
+        // Non-private mode: should NOT reconnect
+        return { action: "disconnect", reAuth: false };
+      } else {
+        // No token used: unexpected, retry
+        reconnectCalled = true;
+        return { action: "reconnect", reAuth: false };
+      }
+    }
+    return { action: "continue", reAuth: false };
   }
   
-  // Test token fetch
-  mockGetSubscriberToken("room123", "invite456").then(token => {
-    assert(token === "mock-jwt-token-room123", "Should return token with roomId");
-    console.log("✓ Auto-fetch token logic tests passed");
-  }).catch(err => {
-    console.error("✗ Auto-fetch token logic test failed:", err);
-  });
+  // Test: Private Mode ON, token used, 4003 received
+  const result1 = simulateReconnectBehavior(4003, true, true);
+  assert(result1.action === "reconnect", "Should trigger reconnect in Private Mode");
+  assert(result1.reAuth === true, "Should re-authenticate in Private Mode");
+  
+  // Test: Private Mode OFF, token used, 4003 received
+  const result2 = simulateReconnectBehavior(4003, true, false);
+  assert(result2.action === "disconnect", "Should disconnect without Private Mode");
+  assert(result2.reAuth === false, "Should NOT re-authenticate without Private Mode");
+  
+  // Test: No token, 4003 received (edge case)
+  const result3 = simulateReconnectBehavior(4003, false, false);
+  assert(result3.action === "reconnect", "Should reconnect for unexpected 4003");
+  
+  console.log("✓ 4003 token expiry reconnect flow tests passed");
+}
+
+// Test reAuthInFlight guard prevents repeated re-auth calls on multiple 4003 events
+async function testReAuthInFlightGuard() {
+  console.log("Testing reAuthInFlight guard...");
+
+  function create4003Handler() {
+    let reAuthInFlight = false;
+    let reAuthCalls = 0;
+
+    async function reAuthAndReconnect() {
+      reAuthCalls += 1;
+      // Simulate async re-auth taking time
+      await new Promise((r) => setTimeout(r, 10));
+      reAuthInFlight = false;
+    }
+
+    function onClose(code, lastConnectionPrivateMode) {
+      if (code === 4003 && lastConnectionPrivateMode === true) {
+        if (reAuthInFlight) return;
+        reAuthInFlight = true;
+        void reAuthAndReconnect();
+      }
+    }
+
+    return { onClose, getCalls: () => reAuthCalls };
+  }
+
+  // Private Mode ON -> only one re-auth call even if close fires twice
+  const h1 = create4003Handler();
+  h1.onClose(4003, true);
+  h1.onClose(4003, true);
+  await new Promise((r) => setTimeout(r, 25));
+  assertEqual(h1.getCalls(), 1, "Should only re-auth once while in-flight");
+
+  // Private Mode OFF -> no re-auth
+  const h2 = create4003Handler();
+  h2.onClose(4003, false);
+  await new Promise((r) => setTimeout(r, 25));
+  assertEqual(h2.getCalls(), 0, "Should not re-auth when Private Mode is OFF");
+
+  console.log("✓ reAuthInFlight guard tests passed");
+}
+
+// Test Private Mode token fetch logic
+async function testPrivateModeTokenFetch() {
+  console.log("Testing Private Mode token fetch...");
+  
+  // Mock token function that exposes what would be sent to fetch()
+  async function mockGetSubscriberToken(roomId, password) {
+    const headers = { "X-Dashboard-Password": password };
+    const body = { room: roomId, role: "sub" };
+
+    assert(roomId, "roomId should be provided");
+    assert(password, "password should be provided");
+
+    if (password === "wrong") {
+      throw new Error("Unauthorized (wrong password)");
+    }
+
+    return { token: "mock-jwt-token-" + roomId, headers, body };
+  }
+
+  // Test successful token fetch
+  const ok = await mockGetSubscriberToken("room123", "correctPassword");
+  assertEqual(ok.headers["X-Dashboard-Password"], "correctPassword", "Should include password header");
+  assertEqual(ok.body.room, "room123", "Should include room in body");
+  assertEqual(ok.body.role, "sub", "Should include role in body");
+  assertEqual(ok.token, "mock-jwt-token-room123", "Should return token");
+  console.log("✓ Private Mode token fetch tests passed");
+
+  // Test 401 handling
+  let threw = false;
+  try {
+    await mockGetSubscriberToken("room123", "wrong");
+  } catch (err) {
+    threw = true;
+    assert(String(err.message || err).includes("Unauthorized"), "Should indicate unauthorized");
+  }
+  assert(threw, "Should have thrown for wrong password");
+  console.log("✓ Private Mode 401 handling tests passed");
 }
 
 // Run all tests
@@ -356,7 +608,10 @@ async function runAllTests() {
   
   const tests = [
     testExtractGameId,
+    testSettingsDoesNotPersistPassword,
     testBuildWsUrl,
+    testBuildWsUrlPrivateMode,
+    testGetSubscriberTokenHeaderAnd401,
     testSnapshotMessageHandling,
     testErrorCodeHandling,
     testTokenMasking,
@@ -364,7 +619,9 @@ async function runAllTests() {
     testReconnectLogic,
     testCardNormalization,
     testTokenExpiryLogic,
-    testAutoFetchTokenLogic,
+    testTokenExpiry4003Reconnect,
+    testReAuthInFlightGuard,
+    testPrivateModeTokenFetch,
   ];
   
   let passed = 0;
