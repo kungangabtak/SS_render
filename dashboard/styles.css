@@ -144,18 +144,9 @@ h2 {
   user-select: none;
 }
 
-/* Hide password field by default (shown only when Private Mode is enabled) */
+/* Password is always required for viewers */
 #passwordField {
-  display: none;
-}
-
-#passwordField.visible {
   display: block;
-}
-
-/* Hide token field when Private Mode is enabled */
-#tokenField.hidden-field {
-  display: none;
 }
 
 .field input {

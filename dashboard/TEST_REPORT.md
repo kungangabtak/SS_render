@@ -8,15 +8,15 @@
 
 ### ✅ Unit Tests (10/10 Passing)
 - ✅ extractGameId - URL extraction works correctly
-- ✅ buildWsUrl - URL construction with/without token works
+- ✅ buildWsUrl - URL construction (JWT required for subscribers) works
 - ✅ Error code handling - All hub error codes (4001-4004) are handled
 - ✅ Token masking - Tokens are properly masked in logs
 - ✅ PublisherId fallback - Falls back to "unknown" when missing
 - ✅ Reconnect logic - Exponential backoff calculation is correct
 - ✅ Card normalization - Card value normalization works
 - ✅ Regular message handling - Regular messages process correctly
-- ✅ Token expiry logic - Correctly handles 4003 based on token usage and auto-fetch
-- ✅ Auto-fetch token logic - Token fetching from dom_auth works correctly
+- ✅ Token expiry logic - 4003 triggers re-auth + reconnect
+- ✅ Token fetch contract - Token fetching from dom-auth works correctly (header + 401 mapping)
 
 ### ✅ Integration Tests (2/2 Passing)
 - ✅ Snapshot message handling - Correctly processes hub snapshot on connect
@@ -54,50 +54,39 @@
 **Impact:** MEDIUM - Infinite reconnect loop prevented
 
 **What was fixed:**
-- Added `lastConnectionUsedToken` flag to track token usage
+- Added `reAuthInFlight` guard to prevent repeated re-auth attempts
 - When 4003 (token expired) is received:
-  - If token was used: Stops auto-reconnect, clears token input, highlights field with pulsing red border, focuses input
-  - If no token was used: Reconnects normally (unexpected case)
-- Token input shows "Token expired — enter new JWT" placeholder
-- Visual feedback clears when user types or clicks Connect
+  - Dashboard automatically re-fetches a JWT from dom-auth using the entered password
+  - Then reconnects with the new token (good UX)
 
-**Location:** `app.js` lines 27, 305, 408-430, 460-475, 1032-1040, 1055-1062  
-**CSS:** `styles.css` lines 95-113 (token-expired animation)
+**Location:** `app.js` (WebSocket close handling + `reAuthAndReconnect()`)
 
-### ✅ Issue #4: Auto-Fetch Token from Auth Service (IMPROVEMENT) — IMPLEMENTED
+### ✅ Issue #4: Password-Gated Token Fetch (HIGH) — IMPLEMENTED
 **Status:** ✅ IMPLEMENTED  
-**Impact:** HIGH - Greatly improves UX and enables automatic token management
+**Impact:** HIGH - Removes embedded secrets and prevents room-code-only access
 
 **What was added:**
-- Integrated with `dom_auth` service at `https://dom-auth.onrender.com/token`
+- Integrated with `dom-auth` service at `https://dom-auth.onrender.com/token`
 - `getSubscriberToken()` function fetches JWT tokens for subscribers
-- Auto-fetch checkbox in UI to enable/disable automatic token fetching
-- Invite code input field for authentication with auth service
-- When enabled:
-  - Automatically fetches token on connect if no manual token provided
-  - Automatically fetches new token and reconnects when token expires (4003)
-  - Visual feedback during token fetch
-- When disabled:
-  - Falls back to previous manual token entry behavior
-  - Shows token expired state with helpful hints
+- Password input is **required** for viewers and is **never persisted**
+- Always fetches token on connect (no manual token input)
+- Auto-refreshes token on expiry (4003) and reconnects
 
 **Location:** 
-- `app.js` lines 31-32 (config), 195-244 (fetch function), 319-342 (connect integration), 455-479 (expiry handling)
-- `index.html` lines 54-68 (UI elements)
-- `styles.css` lines 120-149 (checkbox styling)
+- `app.js` (token fetch + connect flow + expiry handling)
+- `index.html` (password field)
 
 **Usage:**
-1. Check "Auto-fetch token from auth service"
-2. Enter invite code (default provided)
-3. Click Connect - token fetched automatically
-4. Token auto-refreshes on expiry
+1. Enter Dashboard Password
+2. Click Connect (JWT fetched automatically)
+3. Token auto-refreshes on expiry (4003)
 
 ---
 
 ### ✅ Verified Working Features
 
 1. **WebSocket Connection**
-   - ✅ URL construction works with/without token
+   - ✅ URL construction requires token for subscribers
    - ✅ Error codes properly handled
    - ✅ Reconnect logic works correctly
 

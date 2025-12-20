@@ -1,7 +1,7 @@
 /*
   Hole Cards Dashboard (vanilla static site)
   - Multi-publisher support: tracks messages from multiple extension instances
-  - Builds wss URL: ?room=...&role=sub (token optional, only if REQUIRE_SUB_TOKEN=true on hub)
+  - Builds wss URL: ?room=...&role=sub&token=... (JWT required for subscribers)
   - Connect/disconnect with cleanup
   - Auto-reconnect w/ exponential backoff (cap 10s)
   - Renders latest 2 cards + metadata for selected publisher
@@ -28,17 +28,11 @@ let renderDebounceTimer = null;
 /** Track if last connection attempt used a token (for token expiry handling) */
 let lastConnectionUsedToken = false;
 
-/** Track if last connection was in Private Mode (for 4003 auto-reconnect) */
-let lastConnectionPrivateMode = false;
-
 /** Current room for reconnection */
 let currentRoom = "";
 
 /** Auth service configuration */
 const AUTH_SERVICE_URL = "https://dom-auth.onrender.com/token";
-
-/** Settings storage key */
-const SETTINGS_KEY = "ss_settings_v1";
 
 /** Guard to prevent re-auth reconnect loops on token expiry (4003) */
 let reAuthInFlight = false;
@@ -59,11 +53,8 @@ let selectedPublisherId = null;
 const els = {
   hubInput: document.getElementById("hubInput"),
   gameIdInput: document.getElementById("gameIdInput"),
-  tokenInput: document.getElementById("tokenInput"),
-  privateModeCheckbox: document.getElementById("privateModeCheckbox"),
   dashboardPasswordInput: document.getElementById("dashboardPasswordInput"),
   passwordField: document.getElementById("passwordField"),
-  tokenField: document.getElementById("tokenField"),
 
   connectBtn: document.getElementById("connectBtn"),
   disconnectBtn: document.getElementById("disconnectBtn"),
@@ -184,22 +175,14 @@ function updateQueryStringFromInputs() {
     const url = new URL(window.location.href);
     const hub = els.hubInput.value.trim();
     const gameId = extractGameId(els.gameIdInput.value);
-    const privateMode = els.privateModeCheckbox?.checked ?? false;
 
     if (hub) url.searchParams.set("hub", hub);
     else url.searchParams.delete("hub");
 
     if (gameId) url.searchParams.set("gameId", gameId);
     else url.searchParams.delete("gameId");
-
-    // Never leak token into URL in Private Mode
-    if (privateMode) {
-      url.searchParams.delete("token");
-    } else {
-      const token = els.tokenInput.value.trim();
-      if (token) url.searchParams.set("token", token);
-      else url.searchParams.delete("token");
-    }
+    // Never store password or token in URL
+    url.searchParams.delete("token");
 
     window.history.replaceState({}, "", url.toString());
   } catch {
@@ -208,78 +191,7 @@ function updateQueryStringFromInputs() {
 }
 
 function currentConfigKey() {
-  const privateMode = els.privateModeCheckbox?.checked ?? false;
-  // In Private Mode, ignore token (it's fetched dynamically, not user input)
-  if (privateMode) {
-    return `${els.hubInput.value.trim()}|${extractGameId(els.gameIdInput.value)}|private`;
-  }
-  return `${els.hubInput.value.trim()}|${extractGameId(els.gameIdInput.value)}|${els.tokenInput.value.trim()}|public`;
-}
-
-// ============================================================
-// Settings (persist ONLY privateMode)
-// ============================================================
-
-function loadSettings() {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { privateMode: false };
-    const parsed = JSON.parse(raw);
-    return { privateMode: Boolean(parsed && parsed.privateMode) };
-  } catch {
-    return { privateMode: false };
-  }
-}
-
-function saveSettings() {
-  try {
-    const privateMode = els.privateModeCheckbox?.checked ?? false;
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ privateMode: Boolean(privateMode) }));
-  } catch {
-    // ignore
-  }
-}
-
-function applySettings() {
-  const settings = loadSettings();
-  if (els.privateModeCheckbox) {
-    els.privateModeCheckbox.checked = Boolean(settings.privateMode);
-  }
-
-  // Password is never persisted; ensure blank on load.
-  if (els.dashboardPasswordInput) {
-    els.dashboardPasswordInput.value = "";
-  }
-
-  updatePrivateModeUI();
-}
-
-/**
- * Update UI visibility based on Private Mode state
- */
-function updatePrivateModeUI() {
-  const privateMode = els.privateModeCheckbox?.checked ?? false;
-  if (els.passwordField) {
-    els.passwordField.classList.toggle("visible", privateMode);
-  }
-  // Token field visibility: show only in non-private mode or for debugging
-  if (els.tokenField) {
-    els.tokenField.classList.toggle("hidden-field", privateMode);
-  }
-
-  // In Private Mode, manual token override is ignored.
-  if (els.tokenInput) {
-    els.tokenInput.disabled = privateMode;
-    if (privateMode) {
-      els.tokenInput.value = "";
-      if (els.tokenInput.classList.contains("token-expired")) {
-        els.tokenInput.classList.remove("token-expired");
-        els.tokenInput.placeholder = "JWT token (auto-managed in Private Mode)";
-      }
-    } else {
-      els.tokenInput.placeholder = "JWT token (if required by hub)";
-    }
-  }
+  return `${els.hubInput.value.trim()}|${extractGameId(els.gameIdInput.value)}`;
 }
 
 /**
@@ -343,7 +255,7 @@ async function getSubscriberToken(roomId, password) {
  * Hub can be base like wss://x.onrender.com or wss://x.onrender.com/
  * 
  * Produces URL format: wss://dom-hub.onrender.com/?role=sub&room=...
- * Token is optional - only added if provided (required if hub has REQUIRE_SUB_TOKEN=true)
+ * Token is required for subscribers
  * Note: Uses 'room' parameter (not 'gameId') to match server expectations
  */
 function buildWsUrl(hub, gameId, token) {
@@ -365,11 +277,9 @@ function buildWsUrl(hub, gameId, token) {
   }
   u.searchParams.set("room", room);
   
-  // Add token only if provided (optional for subscribers by default)
   const tokenValue = String(token || "").trim();
-  if (tokenValue) {
-    u.searchParams.set("token", tokenValue);
-  }
+  if (!tokenValue) throw new Error("Missing token (JWT required)");
+  u.searchParams.set("token", tokenValue);
   return u.toString();
 }
 
@@ -423,10 +333,9 @@ function scheduleReconnect() {
   }, delay);
 }
 
-function openWebSocketConnection({ hub, room, token, privateMode }) {
+function openWebSocketConnection({ hub, room, token }) {
   // Track connection state for expiry handling
   lastConnectionUsedToken = !!token;
-  lastConnectionPrivateMode = !!privateMode;
   currentRoom = room;
 
   const configKey = currentConfigKey();
@@ -521,9 +430,7 @@ function openWebSocketConnection({ hub, room, token, privateMode }) {
               code,
               reason: "Invalid or missing token",
               detail: reason,
-              hint: lastConnectionPrivateMode
-                ? "Authentication failed. Double-check your password and try again."
-                : "Hub requires auth. Enable Private Mode.",
+              hint: "Authentication failed. Double-check your password and try again.",
             },
             null,
             2
@@ -532,7 +439,7 @@ function openWebSocketConnection({ hub, room, token, privateMode }) {
         break;
       case 4003:
         appendLog({
-          kind: lastConnectionPrivateMode ? "info" : "error",
+          kind: "info",
           time: Date.now(),
           cardsText: "(close 4003)",
           raw: JSON.stringify(
@@ -541,9 +448,7 @@ function openWebSocketConnection({ hub, room, token, privateMode }) {
               code,
               reason: "Token expired",
               detail: reason,
-              action: lastConnectionPrivateMode
-                ? "Re-authenticating and reconnecting (Private Mode)..."
-                : "Please enter a new JWT token and click Connect (or enable Private Mode).",
+              action: "Re-authenticating and reconnecting...",
             },
             null,
             2
@@ -597,22 +502,8 @@ function openWebSocketConnection({ hub, room, token, privateMode }) {
     }
 
     if (code === 4003) {
-      // Token expired
-      if (lastConnectionPrivateMode) {
-        // Private Mode - re-auth and reconnect (guarded to prevent loops)
-        void reAuthAndReconnect();
-        return;
-      }
-
-      if (lastConnectionUsedToken) {
-        // Manual token - user must provide new token
-        setStatus("disconnected");
-        return;
-      }
-
-      // No token was used (unexpected) - try reconnecting without token
-      setStatus("reconnecting");
-      scheduleReconnect();
+      // Token expired -> re-auth and reconnect (guarded to prevent loops)
+      void reAuthAndReconnect();
       return;
     }
 
@@ -628,7 +519,6 @@ async function reAuthAndReconnect() {
 
   try {
     if (manualDisconnect) return;
-    if (!(els.privateModeCheckbox?.checked ?? false)) return;
 
     const hub = els.hubInput.value.trim();
     const room = currentRoom || extractGameId(els.gameIdInput.value);
@@ -642,7 +532,7 @@ async function reAuthAndReconnect() {
         raw: JSON.stringify(
           {
             error: "Token expired but password is missing",
-            hint: "Enter Dashboard Password and click Connect (Private Mode).",
+            hint: "Enter Dashboard Password and click Connect.",
           },
           null,
           2
@@ -656,7 +546,7 @@ async function reAuthAndReconnect() {
     const auth = await getSubscriberToken(room, pw);
     if (manualDisconnect) return;
 
-    openWebSocketConnection({ hub, room, token: auth.token, privateMode: true });
+    openWebSocketConnection({ hub, room, token: auth.token });
   } catch (e) {
     appendLog({
       kind: "error",
@@ -683,9 +573,8 @@ async function reAuthAndReconnect() {
 async function connect(opts = {}) {
   const hub = els.hubInput.value.trim();
   const gameId = extractGameId(els.gameIdInput.value);
-  const privateMode = els.privateModeCheckbox?.checked ?? false;
 
-  // Validate required fields (hub and gameId are required; token is optional)
+  // Validate required fields (hub, gameId, password required)
   if (!hub) {
     appendLog({
       kind: "error",
@@ -711,54 +600,51 @@ async function connect(opts = {}) {
   // Store current room for potential reconnection
   currentRoom = gameId;
 
-  // Private Mode: fetch token from auth service using password
-  if (privateMode) {
-    // Clear token input in private mode (token stays in memory only)
-    if (els.tokenInput) els.tokenInput.value = "";
+  // Always require password (never persisted) and fetch JWT
+  const pw = (els.dashboardPasswordInput?.value || "").trim();
 
-    // Require password (never persisted)
-    const pw = (els.dashboardPasswordInput?.value || "").trim();
-
-    if (!pw) {
-      appendLog({
-        kind: "error",
-        time: Date.now(),
-        cardsText: "—",
-        raw: JSON.stringify({ 
-          error: "Private Mode requires a password",
-          hint: "Enter your dashboard password to authenticate"
-        }, null, 2),
-      });
-      setStatus("disconnected");
-      return;
-    }
-
-    try {
-      setStatus("reconnecting"); // Show connecting status during fetch
-      const auth = await getSubscriberToken(gameId, pw);
-      openWebSocketConnection({ hub, room: gameId, token: auth.token, privateMode: true });
-    } catch (error) {
-      appendLog({
-        kind: "error",
-        time: Date.now(),
-        cardsText: "—",
-        raw: JSON.stringify({ 
-          error: "Failed to authenticate", 
-          detail: error.message,
-          hint: error.message.includes("Unauthorized") 
-            ? "Check your dashboard password" 
-            : "Disable Private Mode to connect without authentication"
-        }, null, 2),
-      });
-      setStatus("disconnected");
-      return;
-    }
+  if (!pw) {
+    appendLog({
+      kind: "error",
+      time: Date.now(),
+      cardsText: "—",
+      raw: JSON.stringify(
+        {
+          error: "Missing dashboard password",
+          hint: "Enter Dashboard Password to fetch a JWT, then click Connect.",
+        },
+        null,
+        2
+      ),
+    });
+    setStatus("disconnected");
     return;
   }
 
-  // Private Mode OFF: connect tokenless by default; token override remains optional.
-  const token = els.tokenInput.value.trim();
-  openWebSocketConnection({ hub, room: gameId, token, privateMode: false });
+  try {
+    setStatus("reconnecting"); // Show connecting status during fetch
+    const auth = await getSubscriberToken(gameId, pw);
+    openWebSocketConnection({ hub, room: gameId, token: auth.token });
+  } catch (error) {
+    appendLog({
+      kind: "error",
+      time: Date.now(),
+      cardsText: "—",
+      raw: JSON.stringify(
+        {
+          error: "Failed to authenticate",
+          detail: error.message,
+          hint: String(error && error.message ? error.message : error).includes("Unauthorized")
+            ? "Unauthorized (wrong password)"
+            : "Network/auth service error. Try again.",
+        },
+        null,
+        2
+      ),
+    });
+    setStatus("disconnected");
+    return;
+  }
 }
 
 // ============================================================
@@ -1253,23 +1139,15 @@ function prefillFromQueryParamsAndAutoconnect() {
     const u = new URL(window.location.href);
     const hub = u.searchParams.get("hub");
     const gameId = u.searchParams.get("gameId");
-    const token = u.searchParams.get("token");
 
     if (hub) els.hubInput.value = hub;
     if (gameId) els.gameIdInput.value = gameId;
 
-    // Only apply token param if NOT in Private Mode (avoid token leakage)
-    const privateMode = els.privateModeCheckbox?.checked ?? false;
-    if (token && !privateMode) {
-      els.tokenInput.value = token;
-    }
-
     lastConfigKey = currentConfigKey();
 
-    // Auto-connect if hub and gameId are provided (token is optional)
-    if (hub && gameId) {
-      connect({ isAuto: true });
-    }
+    // Prefill only. Password is required and never stored, so we do not auto-connect unless user already typed it.
+    const pw = (els.dashboardPasswordInput?.value || "").trim();
+    if (hub && gameId && pw) connect({ isAuto: true });
   } catch {
     // ignore
   }
@@ -1290,11 +1168,6 @@ setInterval(() => {
 // ============================================================
 els.connectBtn.addEventListener("click", () => {
   lastWasAutoReconnect = false;
-  // Clear token-expired state on manual connect attempt
-  if (els.tokenInput.classList.contains("token-expired")) {
-    els.tokenInput.classList.remove("token-expired");
-    els.tokenInput.placeholder = "JWT token (if required by hub)";
-  }
   connect({ isAuto: false });
 });
 
@@ -1319,23 +1192,9 @@ els.hubInput.addEventListener("input", () => {
   scheduleConfigReconnect();
 });
 
-els.tokenInput.addEventListener("input", () => {
-  // Clear token-expired state when user starts typing a new token
-  if (els.tokenInput.classList.contains("token-expired")) {
-    els.tokenInput.classList.remove("token-expired");
-    els.tokenInput.placeholder = "JWT token (if required by hub)";
-  }
+els.dashboardPasswordInput?.addEventListener("input", () => {
   scheduleConfigReconnect();
 });
-
-// Toggle password field visibility based on Private Mode checkbox
-if (els.privateModeCheckbox) {
-  els.privateModeCheckbox.addEventListener("change", () => {
-    updatePrivateModeUI();
-    // Save setting to localStorage
-    saveSettings();
-  });
-}
 
 // ============================================================
 // Initial state
@@ -1345,8 +1204,5 @@ renderCards("—", "", "—", "");
 els.lastUpdate.textContent = "—";
 setTableUrl(null);
 renderPublishersUI();
-
-// Load and apply saved settings
-applySettings();
 
 prefillFromQueryParamsAndAutoconnect();

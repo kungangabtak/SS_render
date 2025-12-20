@@ -23,7 +23,7 @@ This dashboard is pre-configured to connect to: **`wss://dom-hub.onrender.com/`*
 - Fill in:
   - **Hub WSS base** (default: `wss://dom-hub.onrender.com/`)
   - **Game ID (Room)** (paste full PokerNow URL or just the game ID, e.g., `pglQ2HgWGgYbDUSq7f9moVbXR`)
-  - **Token** (your HUB_TOKEN)
+  - **Dashboard Password** (required)
 - Click **Connect**.
 
 No build step, no server required.
@@ -42,11 +42,12 @@ If you open the page with these query params, the inputs will be prefilled and i
 
 - `hub` (your base hub URL)
 - `gameId` (the PokerNow game/room ID)
-- `token` (your HUB_TOKEN)
 
 Example:
 
-`index.html?hub=wss://dom-hub.onrender.com/&gameId=pglQ2HgWGgYbDUSq7f9moVbXR&token=HUB_TOKEN`
+`index.html?hub=wss://dom-hub.onrender.com/&gameId=pglQ2HgWGgYbDUSq7f9moVbXR`
+
+Note: **password is never stored and is never put in the URL**, so auto-connect will only occur if you already have a password typed in (e.g. you refreshed the page without clearing the field).
 
 ## Deploy on Render Static Site
 
@@ -94,7 +95,7 @@ Messages without a `publisherId` are bucketed under `"unknown"`.
 ## Connection
 
 - **Single WebSocket**: The dashboard maintains one WebSocket connection to the hub
-- **Format**: `wss://dom-hub.onrender.com/?room=<ROOM>&role=sub&token=<TOKEN>`
+- **Format**: `wss://dom-hub.onrender.com/?role=sub&room=<ROOM>&token=<JWT>`
 - **Auto-reconnect**: Exponential backoff (500ms → 1s → 2s → 4s → 8s → 10s cap)
 
 ## Connection Status Indicator
@@ -108,9 +109,11 @@ The status badge shows:
 
 - The WS URL format used is:
 
-  `wss://dom-hub.onrender.com/?role=sub&room=pglQ2HgWGgYbDUSq7f9moVbXR&token=HUB_TOKEN`
+  `wss://dom-hub.onrender.com/?role=sub&room=pglQ2HgWGgYbDUSq7f9moVbXR&token=<JWT>`
 
-- The `room` parameter (mapped from the Game ID input) is required to match the room the publisher is using. The token must match the `HUB_TOKEN` environment variable set on your Render service.
+- The dashboard always fetches a **short-lived JWT** from `dom-auth` by POSTing to `https://dom-auth.onrender.com/token` with header `X-Dashboard-Password: <password>` and body `{ room, role: "sub" }`. That JWT is then used to connect to the hub.
+
+- For the corresponding hub + dom-auth server-side security requirements, see `dashboard/SERVER_SECURITY_CHANGES.md`.
 
 - The UI shows:
   - Connection status (connected / disconnected / reconnecting)
