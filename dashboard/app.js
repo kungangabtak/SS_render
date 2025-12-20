@@ -887,12 +887,8 @@ function renderPublishersUI() {
         const pub = publishers[id];
         const isSelected = getEffectivePublisherId() === id;
 
-        // Check fold state
-        const foldStateMsg = pub.latestByType["foldState"];
-        const isFolded = foldStateMsg && foldStateMsg.data && foldStateMsg.data.folded === true;
-
         const card = document.createElement("div");
-        card.className = `pubCard${isSelected ? " selected" : ""}${isFolded ? " folded" : ""}`;
+        card.className = `pubCard${isSelected ? " selected" : ""}`;
         card.dataset.pubId = id;
 
         // Player name (if available) or Publisher ID (shortened)

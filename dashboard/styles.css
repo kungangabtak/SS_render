@@ -317,16 +317,6 @@ code {
   border-color: var(--cyan);
 }
 
-.pubCard.folded {
-  opacity: 0.35;
-  filter: grayscale(0.6);
-  transition: opacity 0.3s, filter 0.3s;
-}
-
-.pubCard.folded:hover {
-  opacity: 0.5;
-}
-
 .pubName {
   font-weight: 700;
   font-size: 14px;
