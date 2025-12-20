@@ -660,10 +660,18 @@ function renderCards(value1, suit1, value2, suit2) {
   els.card1Value.textContent = v1;
   els.card1Suit.textContent = s1;
   els.card1.dataset.color = suitColor(suit1);
+  // Extra dataset used by CSS for corner rendering
+  els.card1.dataset.value = v1;
+  els.card1.dataset.suit = s1;
+  els.card1Value.dataset.suit = s1;
 
   els.card2Value.textContent = v2;
   els.card2Suit.textContent = s2;
   els.card2.dataset.color = suitColor(suit2);
+  // Extra dataset used by CSS for corner rendering
+  els.card2.dataset.value = v2;
+  els.card2.dataset.suit = s2;
+  els.card2Value.dataset.suit = s2;
 }
 
 function setLastUpdate(ts) {
@@ -879,8 +887,12 @@ function renderPublishersUI() {
         const pub = publishers[id];
         const isSelected = getEffectivePublisherId() === id;
 
+        // Check fold state
+        const foldStateMsg = pub.latestByType["foldState"];
+        const isFolded = foldStateMsg && foldStateMsg.data && foldStateMsg.data.folded === true;
+
         const card = document.createElement("div");
-        card.className = `pubCard${isSelected ? " selected" : ""}`;
+        card.className = `pubCard${isSelected ? " selected" : ""}${isFolded ? " folded" : ""}`;
         card.dataset.pubId = id;
 
         // Player name (if available) or Publisher ID (shortened)

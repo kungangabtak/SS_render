@@ -317,6 +317,16 @@ code {
   border-color: var(--cyan);
 }
 
+.pubCard.folded {
+  opacity: 0.35;
+  filter: grayscale(0.6);
+  transition: opacity 0.3s, filter 0.3s;
+}
+
+.pubCard.folded:hover {
+  opacity: 0.5;
+}
+
 .pubName {
   font-weight: 700;
   font-size: 14px;
@@ -417,38 +427,90 @@ code {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(100px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 20px;
+  max-width: 620px;
 }
 
 .cardTile {
   background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 16px;
-  padding: 16px;
-  min-height: 110px;
-  display: grid;
-  align-content: space-between;
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+  border: 2px solid var(--card-border);
+  border-radius: 18px;
+  padding: 18px;
+  min-height: 220px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.28),
+    0 6px 14px rgba(0, 0, 0, 0.18);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .cardTile .value {
-  font-size: 38px;
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  font-size: 44px;
   font-weight: 900;
   line-height: 1;
   color: var(--card-black);
+  letter-spacing: -0.8px;
+}
+
+.cardTile .value::after {
+  /* small top-left suit (pulled from JS via data-suit on the value element) */
+  content: attr(data-suit);
+  display: block;
+  margin-top: 6px;
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 800;
+  opacity: 0.95;
 }
 
 .cardTile .suit {
-  font-size: 36px;
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  transform: translate(-50%, -50%);
+  font-size: 104px;
   line-height: 1;
-  justify-self: end;
   color: var(--card-black);
+  opacity: 0.92;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.08));
 }
 
 .cardTile[data-color="red"] .value,
-.cardTile[data-color="red"] .suit {
+.cardTile[data-color="red"] .suit,
+.cardTile[data-color="red"] .value::after {
   color: var(--card-red);
+}
+
+.cardTile::after {
+  /* bottom-right corner value+suit, rotated like a real card */
+  content: attr(data-value) "\A" attr(data-suit);
+  white-space: pre;
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  transform: rotate(180deg);
+  font-size: 44px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.8px;
+  color: var(--card-black);
+  opacity: 0.95;
+}
+
+.cardTile[data-color="red"]::after {
+  color: var(--card-red);
+}
+
+.cardTile:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.34),
+    0 8px 18px rgba(0, 0, 0, 0.22);
 }
 
 /* ============================================================

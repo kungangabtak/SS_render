@@ -12,6 +12,7 @@ This dashboard now supports **multiple publishers** (multiple people running the
 - **Auto-Selection**: Automatically selects the most recently seen publisher
 - **JSON Viewer**: View all message types (hand, state, etc.) from the selected publisher
 - **Real-time Updates**: Publisher cards update with "seconds ago" timestamps
+- **Fold State Visualization**: Publisher cards are automatically dimmed (with reduced opacity and grayscale) when a player folds, making it easier to see who's still active in the hand
 
 ## Hub URL
 
@@ -63,6 +64,7 @@ That's it — Render will serve `dashboard/index.html`.
 
 The Chrome extension publisher includes `publisherId` and `playerName` fields on every hub message at the top level:
 
+**Hand Message:**
 ```json
 {
   "publisherId": "449iYoPwk6",
@@ -77,6 +79,22 @@ The Chrome extension publisher includes `publisherId` and `playerName` fields on
     "timestamp": 1702847123456
   },
   "timestamp": 1702847123456
+}
+```
+
+**Fold State Message:**
+```json
+{
+  "type": "foldState",
+  "publisherId": "ext-abc123",
+  "pokerNowPlayerId": "player-xyz",
+  "playerName": "John Doe",
+  "data": {
+    "folded": true,
+    "url": "https://www.pokernow.club/games/...",
+    "timestamp": 1734720556547
+  },
+  "timestamp": 1734720556548
 }
 ```
 
