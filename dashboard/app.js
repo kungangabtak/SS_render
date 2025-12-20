@@ -37,6 +37,7 @@ const AUTH_SERVICE_URL = "https://dom-auth.onrender.com/token";
 /** Guard to prevent re-auth reconnect loops on token expiry (4003) */
 let reAuthInFlight = false;
 
+
 // ============================================================
 // Multi-Publisher Store
 // ============================================================
@@ -63,29 +64,18 @@ const els = {
   statusBadge: document.getElementById("statusBadge"),
   statusText: document.getElementById("statusText"),
 
-  card1: document.getElementById("card1"),
-  card1Value: document.getElementById("card1Value"),
-  card1Suit: document.getElementById("card1Suit"),
-  card2: document.getElementById("card2"),
-  card2Value: document.getElementById("card2Value"),
-  card2Suit: document.getElementById("card2Suit"),
-
-  lastUpdate: document.getElementById("lastUpdate"),
-  tableUrlRow: document.getElementById("tableUrlRow"),
-  tableUrl: document.getElementById("tableUrl"),
-
   log: document.getElementById("log"),
 
   // New multi-publisher elements
   publishersList: document.getElementById("publishersList"),
   publisherCount: document.getElementById("publisherCount"),
-  selectedPublisherInfo: document.getElementById("selectedPublisherInfo"),
-  selectedPublisherId: document.getElementById("selectedPublisherId"),
-  selectedPublisherLastSeen: document.getElementById("selectedPublisherLastSeen"),
   jsonViewer: document.getElementById("jsonViewer"),
   publisherSwitcher: document.getElementById("publisherSwitcher"),
+  publisherCardsGrid: document.getElementById("publisherCardsGrid"),
   settingsPanel: document.getElementById("settingsPanel"),
   settingsToggle: document.getElementById("settingsToggle"),
+  debugPanel: document.getElementById("debugPanel"),
+  debugOpenToggle: document.getElementById("debugOpenToggle"),
   debugToggle: document.getElementById("debugToggle"),
   debugContent: document.getElementById("debugContent"),
   debugTabs: Array.from(document.querySelectorAll(".debugTab")),
@@ -131,9 +121,12 @@ function suitSymbol(suit) {
 
 function suitColor(suit) {
   const s = String(suit || "").trim().toLowerCase();
-  if (s === "h" || s === "d") return "red";
-  if (s === "c" || s === "s") return "black";
-  return "black";
+  // Used as data attribute for styling. Keep values stable and explicit.
+  if (s === "s") return "spade";
+  if (s === "h") return "heart";
+  if (s === "d") return "diamond";
+  if (s === "c") return "club";
+  return "spade";
 }
 
 function formatTwoCards(value1, suit1, value2, suit2) {
@@ -665,49 +658,7 @@ async function connect(opts = {}) {
 // Card Rendering (for selected publisher)
 // ============================================================
 
-function renderCards(value1, suit1, value2, suit2) {
-  const v1 = normalizeValue(value1);
-  const v2 = normalizeValue(value2);
-  const s1 = suitSymbol(suit1);
-  const s2 = suitSymbol(suit2);
-
-  els.card1Value.textContent = v1;
-  els.card1Suit.textContent = s1;
-  els.card1.dataset.color = suitColor(suit1);
-  // Extra dataset used by CSS for corner rendering
-  els.card1.dataset.value = v1;
-  els.card1.dataset.suit = s1;
-  els.card1Value.dataset.suit = s1;
-
-  els.card2Value.textContent = v2;
-  els.card2Suit.textContent = s2;
-  els.card2.dataset.color = suitColor(suit2);
-  // Extra dataset used by CSS for corner rendering
-  els.card2.dataset.value = v2;
-  els.card2.dataset.suit = s2;
-  els.card2Value.dataset.suit = s2;
-}
-
-function setLastUpdate(ts) {
-  if (!ts || Number.isNaN(Number(ts))) {
-    els.lastUpdate.textContent = "—";
-    return;
-  }
-  els.lastUpdate.textContent = new Date(Number(ts)).toLocaleString();
-}
-
-function setTableUrl(url) {
-  if (!url) {
-    els.tableUrlRow.hidden = true;
-    els.tableUrl.textContent = "—";
-    els.tableUrl.href = "#";
-    return;
-  }
-
-  els.tableUrlRow.hidden = false;
-  els.tableUrl.textContent = url;
-  els.tableUrl.href = url;
-}
+// Deprecated single-card rendering removed in favor of per-publisher cards grid
 
 function prettyJson(objOrStr) {
   if (typeof objOrStr === "string") return objOrStr;
@@ -961,95 +912,8 @@ function renderPublishersUI() {
     }
   }
 
-  // Update selected publisher info and card display
-  const effectiveId = getEffectivePublisherId();
-
-  if (effectiveId && publishers[effectiveId]) {
-    const pub = publishers[effectiveId];
-
-    // Update selected publisher info
-    if (els.selectedPublisherId) {
-      // Show player name with ID, or just ID if no name
-      const displayText = pub.playerName 
-        ? `${pub.playerName} (${shortenId(effectiveId)})`
-        : shortenId(effectiveId);
-      els.selectedPublisherId.textContent = displayText;
-    }
-    if (els.selectedPublisherLastSeen) {
-      els.selectedPublisherLastSeen.textContent = formatSecondsAgo(pub.lastSeen);
-    }
-    if (els.selectedPublisherInfo) {
-      els.selectedPublisherInfo.hidden = false;
-    }
-
-    // Render cards from hand message if available
-    const handMsg = pub.latestByType["hand"];
-    if (handMsg) {
-      const { value1, suit1, value2, suit2, url, ts } = extractHandFields(handMsg);
-      const hasCards = value1 && suit1 && value2 && suit2;
-      if (hasCards) {
-        renderCards(value1, suit1, value2, suit2);
-        setLastUpdate(ts || pub.lastSeen);
-        setTableUrl(url);
-      }
-    }
-
-    // Render JSON viewer with all latestByType entries
-    if (els.jsonViewer) {
-      els.jsonViewer.innerHTML = "";
-
-      const types = Object.keys(pub.latestByType).sort();
-      if (types.length === 0) {
-        els.jsonViewer.textContent = "No messages yet.";
-      } else {
-        for (const type of types) {
-          const msg = pub.latestByType[type];
-
-          const typeEntry = document.createElement("div");
-          typeEntry.className = "jsonEntry";
-          typeEntry.dataset.expanded = "false";
-
-          const header = document.createElement("div");
-          header.className = "jsonEntryHeader";
-
-          const typeLabel = document.createElement("span");
-          typeLabel.className = "jsonType";
-          typeLabel.textContent = type;
-
-          const tsLabel = document.createElement("span");
-          tsLabel.className = "jsonTs";
-          tsLabel.textContent = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : "—";
-
-          header.appendChild(typeLabel);
-          header.appendChild(tsLabel);
-
-          const content = document.createElement("pre");
-          content.className = "jsonContent";
-          content.textContent = prettyJson(msg);
-
-          typeEntry.appendChild(header);
-          typeEntry.appendChild(content);
-
-          header.addEventListener("click", () => {
-            typeEntry.dataset.expanded = typeEntry.dataset.expanded === "true" ? "false" : "true";
-          });
-
-          els.jsonViewer.appendChild(typeEntry);
-        }
-      }
-    }
-  } else {
-    // No publisher selected
-    if (els.selectedPublisherInfo) {
-      els.selectedPublisherInfo.hidden = true;
-    }
-    renderCards("—", "", "—", "");
-    setLastUpdate(null);
-    setTableUrl(null);
-    if (els.jsonViewer) {
-      els.jsonViewer.textContent = "Select a publisher to view details.";
-    }
-  }
+  renderPublisherCards();
+  renderSelectedPublisherDetails();
 }
 
 // ============================================================
@@ -1119,6 +983,150 @@ function appendLog(entry) {
   // Keep scrolled to bottom when new entries arrive (but only if user is already near bottom)
   if (nearBottom) {
     els.log.scrollTop = els.log.scrollHeight;
+  }
+}
+
+// Hand-history rail removed (log sidebar covers this use-case)
+
+function renderPublisherCards() {
+  if (!els.publisherCardsGrid) return;
+
+  const grid = els.publisherCardsGrid;
+  grid.innerHTML = "";
+
+  const entries = Object.entries(publishers).sort((a, b) => b[1].lastSeen - a[1].lastSeen);
+
+  if (entries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "pubEmpty";
+    empty.textContent = "No publishers yet. Waiting for messages...";
+    grid.appendChild(empty);
+    return;
+  }
+
+  const effectiveId = getEffectivePublisherId();
+
+  for (const [id, pub] of entries) {
+    const handMsg = pub.latestByType["hand"];
+    const { value1, suit1, value2, suit2 } = handMsg ? extractHandFields(handMsg) : {};
+    const hasCards = value1 && suit1 && value2 && suit2;
+
+    const card = document.createElement("div");
+    card.className = `pubCardTile${effectiveId === id ? " selected" : ""}`;
+    card.dataset.pubId = id;
+
+    const top = document.createElement("div");
+    top.className = "pubCardTop";
+
+    const name = document.createElement("div");
+    name.className = "pubCardName";
+    name.textContent = pub.playerName || shortenId(id);
+
+    const time = document.createElement("div");
+    time.className = "pubCardTime";
+    time.textContent = formatSecondsAgo(pub.lastSeen);
+
+    top.appendChild(name);
+    top.appendChild(time);
+
+    const cardsWrap = document.createElement("div");
+    cardsWrap.className = "miniCards";
+
+    if (hasCards) {
+      cardsWrap.appendChild(createMiniCard(value1, suit1));
+      cardsWrap.appendChild(createMiniCard(value2, suit2));
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "handEmpty";
+      placeholder.textContent = "No cards yet.";
+      cardsWrap.appendChild(placeholder);
+    }
+
+    card.addEventListener("click", () => {
+      selectedPublisherId = id;
+      renderPublishersUI();
+    });
+
+    card.appendChild(top);
+    card.appendChild(cardsWrap);
+    grid.appendChild(card);
+  }
+}
+
+function createMiniCard(value, suit) {
+  const tile = document.createElement("div");
+  tile.className = "miniCard";
+  const v = normalizeValue(value);
+  const s = suitSymbol(suit);
+  tile.dataset.color = suitColor(suit);
+  tile.dataset.value = v;
+  tile.dataset.suit = s;
+
+  const vEl = document.createElement("div");
+  vEl.className = "value";
+  vEl.textContent = v;
+  vEl.dataset.suit = s;
+
+  const sEl = document.createElement("div");
+  sEl.className = "suit";
+  sEl.textContent = s;
+
+  tile.appendChild(vEl);
+  tile.appendChild(sEl);
+  return tile;
+}
+
+function renderSelectedPublisherDetails() {
+  const effectiveId = getEffectivePublisherId();
+  if (!els.jsonViewer) return;
+
+  if (!effectiveId || !publishers[effectiveId]) {
+    els.jsonViewer.textContent = "Select a publisher to view details.";
+    return;
+  }
+
+  const pub = publishers[effectiveId];
+  els.jsonViewer.innerHTML = "";
+
+  const types = Object.keys(pub.latestByType).sort();
+  if (types.length === 0) {
+    els.jsonViewer.textContent = "No messages yet.";
+    return;
+  }
+
+  for (const type of types) {
+    const msg = pub.latestByType[type];
+
+    const typeEntry = document.createElement("div");
+    typeEntry.className = "jsonEntry";
+    typeEntry.dataset.expanded = "false";
+
+    const header = document.createElement("div");
+    header.className = "jsonEntryHeader";
+
+    const typeLabel = document.createElement("span");
+    typeLabel.className = "jsonType";
+    typeLabel.textContent = type;
+
+    const tsLabel = document.createElement("span");
+    tsLabel.className = "jsonTs";
+    tsLabel.textContent = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : "—";
+
+    header.appendChild(typeLabel);
+    header.appendChild(tsLabel);
+
+    const content = document.createElement("pre");
+    content.className = "jsonContent";
+    content.textContent = prettyJson(msg);
+
+    typeEntry.appendChild(header);
+    typeEntry.appendChild(content);
+
+    header.addEventListener("click", () => {
+      typeEntry.dataset.expanded = typeEntry.dataset.expanded === "true" ? "false" : "true";
+    });
+
+    els.jsonViewer.appendChild(typeEntry);
   }
 }
 
@@ -1235,11 +1243,35 @@ const debugViewers = {
   json: els.jsonViewerSection,
 };
 
-if (els.debugToggle && els.debugContent) {
+const setDebugOpen = (isOpen) => {
+  if (!els.debugPanel || !els.debugContent) return;
+  if (isOpen) {
+    els.debugPanel.classList.add("open");
+    els.debugContent.hidden = false;
+  } else {
+    els.debugPanel.classList.remove("open");
+    els.debugContent.hidden = true;
+  }
+
+  if (els.debugToggle) {
+    els.debugToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  }
+  if (els.debugOpenToggle) {
+    els.debugOpenToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  }
+};
+
+if (els.debugToggle) {
   els.debugToggle.addEventListener("click", () => {
-    const willShow = els.debugContent.hidden;
-    els.debugContent.hidden = !willShow;
-    els.debugToggle.setAttribute("aria-expanded", willShow ? "true" : "false");
+    const isOpen = !els.debugPanel?.classList.contains("open");
+    setDebugOpen(isOpen);
+  });
+}
+
+if (els.debugOpenToggle) {
+  els.debugOpenToggle.addEventListener("click", () => {
+    const isOpen = !els.debugPanel?.classList.contains("open");
+    setDebugOpen(isOpen);
   });
 }
 
@@ -1269,9 +1301,7 @@ if (els.debugTabs && els.debugTabs.length) {
 // Initial state
 // ============================================================
 setStatus("disconnected");
-renderCards("—", "", "—", "");
-els.lastUpdate.textContent = "—";
-setTableUrl(null);
 renderPublishersUI();
 
 prefillFromQueryParamsAndAutoconnect();
+setDebugOpen(false);

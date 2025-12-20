@@ -14,6 +14,10 @@
         <span class="brandText">Hole Cards Dashboard</span>
       </div>
       <div class="topRight">
+        <button class="iconBtn" id="debugOpenToggle" aria-expanded="false" aria-controls="debugPanel" title="Show/Hide logs">
+          <span aria-hidden="true">🗂</span>
+          <span class="sr-only">Toggle logs</span>
+        </button>
         <div class="status" id="statusBadge" data-status="disconnected" aria-live="polite">
           <span class="dot" aria-hidden="true"></span>
           <span class="text" id="statusText">disconnected</span>
@@ -74,56 +78,34 @@
         </div>
       </div>
 
-      <!-- Cards first -->
-      <section class="cardsSection">
-        <div class="cardsHeader">
-          <div>
-            <p class="eyebrow">Live hand</p>
-            <h1 class="heroTitle">Hole cards</h1>
+      <div class="mainSplit">
+        <!-- Cards first -->
+        <section class="cardsSection">
+          <div class="cardsHeader">
+            <div>
+              <p class="eyebrow">Live</p>
+              <h1 class="heroTitle">All publishers</h1>
+            </div>
+            <div class="muted smallText">Click a card to view details</div>
           </div>
-          <div class="metaStack" id="selectedPublisherInfo" hidden>
-            <div class="metaItem">
-              <span class="metaLabel">Publisher</span>
-              <span class="metaValue" id="selectedPublisherId">—</span>
-            </div>
-            <div class="metaItem">
-              <span class="metaLabel">Last seen</span>
-              <span class="metaValue" id="selectedPublisherLastSeen">—</span>
-            </div>
-            <div class="metaItem">
-              <span class="metaLabel">Last update</span>
-              <span class="metaValue" id="lastUpdate">—</span>
-            </div>
-            <div class="metaItem" id="tableUrlRow" hidden>
-              <span class="metaLabel">Table</span>
-              <a class="metaValue link" id="tableUrl" href="#" target="_blank" rel="noreferrer">—</a>
-            </div>
-          </div>
-        </div>
 
-        <div class="cardsContainer" aria-label="Latest hole cards">
-          <div class="cardTile" id="card1" data-color="black" aria-label="Card 1">
-            <div class="value" id="card1Value">—</div>
-            <div class="suit" id="card1Suit">?</div>
+          <div class="publisherCardsGrid" id="publisherCardsGrid">
+            <div class="pubEmpty">No publishers yet. Waiting for messages...</div>
           </div>
-          <div class="cardTile" id="card2" data-color="black" aria-label="Card 2">
-            <div class="value" id="card2Value">—</div>
-            <div class="suit" id="card2Suit">?</div>
-          </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
       <!-- Debug + detail -->
-      <section class="debugPanel">
+      <section class="debugPanel" id="debugPanel">
         <div class="debugBar">
-          <button id="debugToggle" class="pillBtn" aria-expanded="false" aria-controls="debugContent">Debug</button>
           <div class="debugTabs">
             <button class="debugTab active" data-tab="log">Log</button>
             <button class="debugTab" data-tab="json">JSON</button>
             <button id="clearLogBtn" class="iconTextBtn" title="Clear message log">Clear</button>
           </div>
+          <button id="debugToggle" class="pillBtn pillSmall" aria-expanded="false" aria-controls="debugContent">Hide</button>
         </div>
-        <div class="debugContent" id="debugContent" hidden>
+        <div class="debugContent" id="debugContent">
           <div class="debugViewer active" id="logViewer">
             <div class="log" id="log"></div>
           </div>

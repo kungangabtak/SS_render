@@ -17,6 +17,8 @@
   --card-border: rgba(0, 0, 0, 0.08);
   --card-black: #1f2937;
   --card-red: #d92b2b;
+  --card-blue: #2563eb;
+  --card-green: #16a34a;
 
   --shadow-sm: 0 10px 30px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.55);
@@ -356,7 +358,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 22px;
-  align-items: center;
+  align-items: stretch;
 }
 
 .cardsHeader {
@@ -412,82 +414,157 @@ body {
   word-break: break-word;
 }
 
-.cardsContainer {
-  display: flex;
-  gap: 30px;
-  justify-content: center;
-  flex-wrap: wrap;
+.publisherCardsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
 }
 
-.cardTile {
-  width: 260px;
-  height: 380px;
+.pubCardTile {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  cursor: pointer;
+}
+
+.pubCardTile:hover {
+  transform: translateY(-4px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+.pubCardTile.selected {
+  border-color: var(--accent);
+  box-shadow: 0 16px 36px rgba(91, 213, 255, 0.3);
+}
+
+.pubCardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.pubCardName {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: var(--text);
+}
+
+.pubCardTime {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.miniCards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.miniCard {
+  /* Allow card contents to size based on the card itself (not the viewport) */
+  container-type: inline-size;
+  position: relative;
   background: var(--card-bg);
   border: 2px solid var(--card-border);
-  border-radius: 22px;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  border-radius: 12px;
+  padding: clamp(10px, 6cqw, 14px);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.28),
+    0 4px 10px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  aspect-ratio: 5 / 7;
 }
 
-.cardTile:hover {
-  transform: translateY(-8px) scale(1.02);
-  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-}
-
-.cardTile .value {
+.miniCard .value {
   position: absolute;
-  top: 18px;
-  left: 18px;
-  font-size: 62px;
+  top: clamp(8px, 5cqw, 12px);
+  left: clamp(8px, 5cqw, 12px);
+  font-size: clamp(22px, 18cqw, 34px);
   font-weight: 900;
   font-family: "DM Serif Display", "Georgia", serif;
   line-height: 1;
-  letter-spacing: -1px;
+  letter-spacing: -0.8px;
   color: var(--card-black);
 }
 
-.cardTile .value::after {
+.miniCard .value::after {
   content: attr(data-suit);
   display: block;
-  margin-top: 8px;
-  font-size: 36px;
+  margin-top: clamp(3px, 2.5cqw, 6px);
+  font-size: clamp(14px, 12cqw, 22px);
   line-height: 1;
   font-weight: 800;
 }
 
-.cardTile .suit {
-  font-size: 140px;
+.miniCard .suit {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(52px, 40cqw, 78px);
   line-height: 1;
   color: var(--card-black);
-  opacity: 0.95;
-  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.12));
+  opacity: 0.92;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.08));
 }
 
-.cardTile[data-color="red"] .value,
-.cardTile[data-color="red"] .suit,
-.cardTile[data-color="red"] .value::after {
+.miniCard[data-color="red"] .value,
+.miniCard[data-color="red"] .suit,
+.miniCard[data-color="red"] .value::after {
   color: var(--card-red);
 }
 
-.cardTile::after {
+.miniCard[data-color="diamond"] .value,
+.miniCard[data-color="diamond"] .suit,
+.miniCard[data-color="diamond"] .value::after,
+.miniCard[data-color="diamond"]::after {
+  color: var(--card-blue);
+}
+
+.miniCard[data-color="club"] .value,
+.miniCard[data-color="club"] .suit,
+.miniCard[data-color="club"] .value::after,
+.miniCard[data-color="club"]::after {
+  color: var(--card-green);
+}
+
+.miniCard[data-color="heart"] .value,
+.miniCard[data-color="heart"] .suit,
+.miniCard[data-color="heart"] .value::after,
+.miniCard[data-color="heart"]::after {
+  color: var(--card-red);
+}
+
+.miniCard[data-color="spade"] .value,
+.miniCard[data-color="spade"] .suit,
+.miniCard[data-color="spade"] .value::after,
+.miniCard[data-color="spade"]::after {
+  color: var(--card-black);
+}
+
+.miniCard::after {
   content: attr(data-value) "\A" attr(data-suit);
   white-space: pre;
   position: absolute;
-  bottom: 18px;
-  right: 18px;
+  bottom: clamp(8px, 5cqw, 12px);
+  right: clamp(8px, 5cqw, 12px);
   transform: rotate(180deg);
-  font-size: 62px;
+  font-size: clamp(22px, 18cqw, 34px);
   font-weight: 900;
-  letter-spacing: -1px;
+  letter-spacing: -0.8px;
   color: var(--card-black);
   font-family: "DM Serif Display", "Georgia", serif;
 }
 
-.cardTile[data-color="red"]::after {
+/* Legacy selectors (kept for safety): */
+.miniCard[data-color="red"]::after {
   color: var(--card-red);
 }
 
@@ -500,17 +577,37 @@ body {
   text-decoration: underline;
 }
 
+/* Main layout */
+.mainSplit {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px;
+  align-items: start;
+  width: 100%;
+}
+
 /* Debug */
 .debugPanel {
   position: fixed;
-  bottom: 0;
-  left: 0;
+  top: 62px;
   right: 0;
+  width: 380px;
+  max-width: 92vw;
+  height: calc(100vh - 62px);
   backdrop-filter: blur(14px);
   background: rgba(8, 12, 24, 0.9);
-  border-top: 1px solid var(--border);
-  padding: 8px 16px 12px;
+  border-left: 1px solid var(--border);
+  padding: 10px 12px 14px;
   z-index: 8;
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.debugPanel.open {
+  transform: translateX(0);
 }
 
 .debugBar {
@@ -535,6 +632,10 @@ body {
 .pillBtn:hover {
   background: rgba(255, 255, 255, 0.16);
   border-color: var(--border-strong);
+}
+
+.pillSmall {
+  padding: 8px 12px;
 }
 
 .debugTabs {
@@ -584,13 +685,13 @@ body {
 
 .debugContent {
   margin-top: 10px;
-  max-height: 50vh;
-  overflow: hidden;
+  flex: 1;
+  min-height: 0;
 }
 
 .debugViewer {
   display: none;
-  max-height: 50vh;
+  height: 100%;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -603,7 +704,7 @@ body {
 }
 
 .log {
-  max-height: 44vh;
+  height: 100%;
   overflow-y: auto;
 }
 
@@ -753,6 +854,10 @@ pre {
 }
 
 @media (max-width: 900px) {
+  .mainSplit {
+    grid-template-columns: 1fr;
+  }
+
   .cardsHeader {
     flex-direction: column;
     align-items: flex-start;
@@ -781,6 +886,10 @@ pre {
 
   .settingsContent {
     grid-template-columns: 1fr;
+  }
+
+  .debugPanel {
+    width: 92vw;
   }
 }
 
