@@ -7,132 +7,132 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="page">
-      <header class="header">
-        <div>
-          <h1>Hole Cards Dashboard</h1>
-          <p class="subhead">Multi-publisher view — subscribe to your WebSocket hub and display hole cards from multiple extension instances.</p>
-        </div>
-        <div class="status" id="statusBadge" data-status="disconnected">
+    <!-- Top bar with status + quick settings toggle -->
+    <div class="topBar">
+      <div class="brand">
+        <span class="brandMark"></span>
+        <span class="brandText">Hole Cards Dashboard</span>
+      </div>
+      <div class="topRight">
+        <div class="status" id="statusBadge" data-status="disconnected" aria-live="polite">
           <span class="dot" aria-hidden="true"></span>
           <span class="text" id="statusText">disconnected</span>
         </div>
-      </header>
+        <button class="iconBtn" id="settingsToggle" aria-expanded="true" aria-controls="settingsPanel" title="Show/Hide settings">
+          <span aria-hidden="true">⚙</span>
+          <span class="sr-only">Toggle settings</span>
+        </button>
+      </div>
+    </div>
 
-      <section class="panel">
-        <div class="grid">
-          <div class="field">
-            <label for="hubInput">Hub WSS base</label>
-            <input
-              id="hubInput"
-              type="text"
-              spellcheck="false"
-              placeholder="wss://dom-hub.onrender.com/"
-              value="wss://dom-hub.onrender.com/"
-              autocomplete="off"
-            />
-            <div class="hint">Example: <code>wss://dom-hub.onrender.com/</code></div>
-          </div>
-
-          <div class="field">
-            <label for="gameIdInput">Game ID (Room)</label>
-            <input
-              id="gameIdInput"
-              type="text"
-              spellcheck="false"
-              placeholder="pglQ2HgWGgYbDUSq7f9moVbXR"
-              autocomplete="off"
-            />
-            <div class="hint">Paste full PokerNow URL or just the game ID</div>
-          </div>
-
-          <div class="field" id="passwordField">
-            <label for="dashboardPasswordInput">Dashboard Password</label>
-            <input id="dashboardPasswordInput" type="password" spellcheck="false" placeholder="Enter password" autocomplete="off" />
-            <div class="hint">Required. Used to fetch a short-lived JWT from dom-auth.</div>
-          </div>
-
-          <div class="actions">
-            <button id="connectBtn" class="btn primary">Connect</button>
-            <button id="disconnectBtn" class="btn" disabled>Disconnect</button>
-            <button id="clearLogBtn" class="btn danger" title="Clear message log">Clear log</button>
-          </div>
+    <!-- Collapsible settings -->
+    <section class="settingsPanel visible" id="settingsPanel">
+      <div class="settingsContent">
+        <div class="field">
+          <label for="hubInput">Hub WSS</label>
+          <input
+            id="hubInput"
+            type="text"
+            spellcheck="false"
+            placeholder="wss://dom-hub.onrender.com/"
+            value="wss://dom-hub.onrender.com/"
+            autocomplete="off"
+          />
         </div>
-      </section>
 
-      <!-- Publishers Panel -->
-      <section class="panel publishersPanel">
-        <div class="publishersHeader">
-          <h2>Publishers <span class="pubCount" id="publisherCount"></span></h2>
-          <div class="publishersHint">Click a publisher to select and view their data</div>
+        <div class="field">
+          <label for="gameIdInput">Game ID</label>
+          <input
+            id="gameIdInput"
+            type="text"
+            spellcheck="false"
+            placeholder="Paste PokerNow URL or game ID"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="field" id="passwordField">
+          <label for="dashboardPasswordInput">Password</label>
+          <input id="dashboardPasswordInput" type="password" spellcheck="false" placeholder="Enter password" autocomplete="off" />
+        </div>
+
+        <div class="actions">
+          <button id="connectBtn" class="btn primary">Connect</button>
+          <button id="disconnectBtn" class="btn ghost" disabled>Disconnect</button>
+        </div>
+      </div>
+    </section>
+
+    <main class="page">
+      <!-- Publisher pills -->
+      <div class="publisherSwitcher" id="publisherSwitcher" hidden>
+        <div class="switcherLabel">
+          Publishers <span class="muted" id="publisherCount"></span>
         </div>
         <div class="publishersList" id="publishersList">
           <div class="pubEmpty">No publishers yet. Waiting for messages...</div>
         </div>
-      </section>
-
-      <!-- Two-column layout: Cards + JSON Viewer -->
-      <div class="twoCol">
-        <!-- Left: Cards Display -->
-        <section class="panel cardsPanel">
-          <div class="cardsHeader">
-            <h2>Latest hand</h2>
-            <div class="meta" id="selectedPublisherInfo" hidden>
-              <div class="metaRow">
-                <span class="metaLabel">Publisher</span>
-                <span class="metaValue" id="selectedPublisherId">—</span>
-              </div>
-              <div class="metaRow">
-                <span class="metaLabel">Last seen</span>
-                <span class="metaValue" id="selectedPublisherLastSeen">—</span>
-              </div>
-              <div class="metaRow">
-                <span class="metaLabel">Last update</span>
-                <span class="metaValue" id="lastUpdate">—</span>
-              </div>
-              <div class="metaRow" id="tableUrlRow" hidden>
-                <span class="metaLabel">Table</span>
-                <a class="metaValue link" id="tableUrl" href="#" target="_blank" rel="noreferrer">—</a>
-              </div>
-            </div>
-          </div>
-
-          <div class="cards" aria-label="Latest hole cards">
-            <div class="cardTile" id="card1" data-color="black" aria-label="Card 1">
-              <div class="value" id="card1Value">—</div>
-              <div class="suit" id="card1Suit">?</div>
-            </div>
-            <div class="cardTile" id="card2" data-color="black" aria-label="Card 2">
-              <div class="value" id="card2Value">—</div>
-              <div class="suit" id="card2Suit">?</div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Right: JSON Viewer -->
-        <section class="panel jsonPanel">
-          <div class="jsonHeader">
-            <h2>Message Types</h2>
-            <div class="jsonHint">Click to expand full JSON</div>
-          </div>
-          <div class="jsonViewer" id="jsonViewer">
-            Select a publisher to view details.
-          </div>
-        </section>
       </div>
 
-      <section class="panel">
-        <div class="logHeader">
-          <h2>Message log</h2>
-          <div class="logHint">Last ~50 messages. Click a row to expand raw JSON.</div>
+      <!-- Cards first -->
+      <section class="cardsSection">
+        <div class="cardsHeader">
+          <div>
+            <p class="eyebrow">Live hand</p>
+            <h1 class="heroTitle">Hole cards</h1>
+          </div>
+          <div class="metaStack" id="selectedPublisherInfo" hidden>
+            <div class="metaItem">
+              <span class="metaLabel">Publisher</span>
+              <span class="metaValue" id="selectedPublisherId">—</span>
+            </div>
+            <div class="metaItem">
+              <span class="metaLabel">Last seen</span>
+              <span class="metaValue" id="selectedPublisherLastSeen">—</span>
+            </div>
+            <div class="metaItem">
+              <span class="metaLabel">Last update</span>
+              <span class="metaValue" id="lastUpdate">—</span>
+            </div>
+            <div class="metaItem" id="tableUrlRow" hidden>
+              <span class="metaLabel">Table</span>
+              <a class="metaValue link" id="tableUrl" href="#" target="_blank" rel="noreferrer">—</a>
+            </div>
+          </div>
         </div>
-        <div class="log" id="log"></div>
+
+        <div class="cardsContainer" aria-label="Latest hole cards">
+          <div class="cardTile" id="card1" data-color="black" aria-label="Card 1">
+            <div class="value" id="card1Value">—</div>
+            <div class="suit" id="card1Suit">?</div>
+          </div>
+          <div class="cardTile" id="card2" data-color="black" aria-label="Card 2">
+            <div class="value" id="card2Value">—</div>
+            <div class="suit" id="card2Suit">?</div>
+          </div>
+        </div>
       </section>
 
-      <footer class="footer">
-        <span class="muted">Tip: open with query params <code>?hub=...&amp;gameId=...</code> to prefill. Password is never stored or put in the URL.</span>
-      </footer>
-    </div>
+      <!-- Debug + detail -->
+      <section class="debugPanel">
+        <div class="debugBar">
+          <button id="debugToggle" class="pillBtn" aria-expanded="false" aria-controls="debugContent">Debug</button>
+          <div class="debugTabs">
+            <button class="debugTab active" data-tab="log">Log</button>
+            <button class="debugTab" data-tab="json">JSON</button>
+            <button id="clearLogBtn" class="iconTextBtn" title="Clear message log">Clear</button>
+          </div>
+        </div>
+        <div class="debugContent" id="debugContent" hidden>
+          <div class="debugViewer active" id="logViewer">
+            <div class="log" id="log"></div>
+          </div>
+          <div class="debugViewer" id="jsonViewerSection" hidden>
+            <div class="jsonViewer" id="jsonViewer">Select a publisher to view details.</div>
+          </div>
+        </div>
+      </section>
+    </main>
 
     <script src="./app.js"></script>
   </body>

@@ -83,6 +83,14 @@ const els = {
   selectedPublisherId: document.getElementById("selectedPublisherId"),
   selectedPublisherLastSeen: document.getElementById("selectedPublisherLastSeen"),
   jsonViewer: document.getElementById("jsonViewer"),
+  publisherSwitcher: document.getElementById("publisherSwitcher"),
+  settingsPanel: document.getElementById("settingsPanel"),
+  settingsToggle: document.getElementById("settingsToggle"),
+  debugToggle: document.getElementById("debugToggle"),
+  debugContent: document.getElementById("debugContent"),
+  debugTabs: Array.from(document.querySelectorAll(".debugTab")),
+  logViewer: document.getElementById("logViewer"),
+  jsonViewerSection: document.getElementById("jsonViewerSection"),
 };
 
 /**
@@ -168,6 +176,12 @@ function setStatus(status) {
 
   els.connectBtn.disabled = isConnected || isConnecting;
   els.disconnectBtn.disabled = !(isConnected || isConnecting);
+
+  // Collapse settings automatically once connected to keep UI clean mid-game
+  if (isConnected && els.settingsPanel && els.settingsToggle) {
+    els.settingsPanel.classList.remove("visible");
+    els.settingsToggle.setAttribute("aria-expanded", "false");
+  }
 }
 
 function updateQueryStringFromInputs() {
@@ -869,6 +883,9 @@ function renderPublishersUI() {
   if (els.publisherCount) {
     els.publisherCount.textContent = count > 0 ? `(${count})` : "";
   }
+  if (els.publisherSwitcher) {
+    els.publisherSwitcher.hidden = count === 0;
+  }
 
   // Render publishers list
   if (els.publishersList) {
@@ -1203,6 +1220,50 @@ els.hubInput.addEventListener("input", () => {
 els.dashboardPasswordInput?.addEventListener("input", () => {
   scheduleConfigReconnect();
 });
+
+// Settings toggle (collapsible header)
+if (els.settingsToggle && els.settingsPanel) {
+  els.settingsToggle.addEventListener("click", () => {
+    const isVisible = els.settingsPanel.classList.toggle("visible");
+    els.settingsToggle.setAttribute("aria-expanded", isVisible ? "true" : "false");
+  });
+}
+
+// Debug toggle + tabs
+const debugViewers = {
+  log: els.logViewer,
+  json: els.jsonViewerSection,
+};
+
+if (els.debugToggle && els.debugContent) {
+  els.debugToggle.addEventListener("click", () => {
+    const willShow = els.debugContent.hidden;
+    els.debugContent.hidden = !willShow;
+    els.debugToggle.setAttribute("aria-expanded", willShow ? "true" : "false");
+  });
+}
+
+if (els.debugTabs && els.debugTabs.length) {
+  els.debugTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.tab || "log";
+
+      els.debugTabs.forEach((t) => t.classList.remove("active"));
+      Object.values(debugViewers).forEach((viewer) => {
+        if (!viewer) return;
+        viewer.hidden = true;
+        viewer.classList.remove("active");
+      });
+
+      tab.classList.add("active");
+      const targetViewer = target === "json" ? debugViewers.json : debugViewers.log;
+      if (targetViewer) {
+        targetViewer.hidden = false;
+        targetViewer.classList.add("active");
+      }
+    });
+  });
+}
 
 // ============================================================
 // Initial state
